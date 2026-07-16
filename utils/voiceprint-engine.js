@@ -11,19 +11,47 @@
  */
 
 /**
- * Feature extraction from raw PCM audio samples (Uint8Array, 8-bit unsigned).
- * Extracts: mean energy, spectral centroid, zero crossing rate,
- * spectral flux, and MFCC-like coefficients.
+ * 把录音字节流解码为归一化浮点采样数组（值域约 -1..1）。
+ *
+ * 关键：RecorderManager 以 format:'pcm' 采集的帧是「16-bit 有符号小端」PCM，
+ * combineFrames 只是把这些字节逐字节拼进 Uint8Array。若按 8-bit 无符号
+ * （(x-128)/128）去解析，等于把每个 16-bit 采样拆成两个无意义字节，
+ * 特征会退化成噪声，导致声纹注册/验证近乎随机（同人被拒、他人误认、识别认错人）。
+ * 这里按 16-bit LE 正确还原每个采样，再做归一化。
+ *
+ * @param {Uint8Array|ArrayBuffer} bytes 16-bit LE PCM 字节流
+ * @returns {Float32Array} 归一化采样（-1..1）
+ */
+export function decodePcm16(bytes) {
+  const view = bytes instanceof Uint8Array
+    ? bytes
+    : new Uint8Array(bytes || 0);
+  const sampleCount = view.length >> 1; // 每 2 字节一个 16-bit 采样
+  const out = new Float32Array(sampleCount);
+  for (let i = 0; i < sampleCount; i++) {
+    const lo = view[i * 2];
+    const hi = view[i * 2 + 1];
+    let s = (hi << 8) | lo; // 小端：低字节在前
+    if (s >= 0x8000) s -= 0x10000; // 转有符号
+    out[i] = s / 32768;
+  }
+  return out;
+}
+
+/**
+ * Feature extraction from raw PCM audio samples (Uint8Array, 16-bit signed LE).
+ * 先解码为归一化浮点采样，再提取：均能、谱质心、过零率、谱通量、类 MFCC 系数。
  */
 export function extractFeatures(samples, sampleRate = 16000) {
+  const norm = decodePcm16(samples);
   return {
-    meanEnergy: calculateMeanEnergy(samples),
-    spectralCentroid: estimateSpectralCentroid(samples),
-    zeroCrossingRate: calculateZeroCrossingRate(samples),
-    spectralFlux: calculateSpectralFlux(samples),
-    mfccApprox: calculateMFCCApprox(samples, sampleRate),
+    meanEnergy: calculateMeanEnergy(norm),
+    spectralCentroid: estimateSpectralCentroid(norm),
+    zeroCrossingRate: calculateZeroCrossingRate(norm),
+    spectralFlux: calculateSpectralFlux(norm),
+    mfccApprox: calculateMFCCApprox(norm, sampleRate),
     sampleRate: sampleRate,
-    frameCount: samples.length,
+    frameCount: norm.length,
     timestamp: Date.now()
   };
 }
@@ -132,13 +160,14 @@ export function generateVoiceprintHash(features) {
 // Internal: Feature Extraction
 // =====================
 
+// 注：以下内部函数接收「已归一化的浮点采样数组」（decodePcm16 的输出，值域 -1..1）。
 function calculateMeanEnergy(samples) {
   let sum = 0;
   const len = samples.length;
   const step = Math.max(1, Math.floor(len / 1024));
   let count = 0;
   for (let i = 0; i < len; i += step) {
-    const normalized = (samples[i] - 128) / 128;
+    const normalized = samples[i];
     sum += normalized * normalized;
     count++;
   }
@@ -159,7 +188,7 @@ function estimateSpectralCentroid(samples) {
     let magnitudeSum = 0;
 
     for (let i = 0; i < windowSize; i++) {
-      const normalized = (samples[start + i] - 128) / 128;
+      const normalized = samples[start + i];
       const magnitude = Math.abs(normalized);
       weightedSum += i * magnitude;
       magnitudeSum += magnitude;
@@ -181,8 +210,8 @@ function calculateZeroCrossingRate(samples) {
   let comparisons = 0;
 
   for (let i = step; i < len; i += step) {
-    const prev = samples[i - step] > 128 ? 1 : -1;
-    const curr = samples[i] > 128 ? 1 : -1;
+    const prev = samples[i - step] > 0 ? 1 : -1;
+    const curr = samples[i] > 0 ? 1 : -1;
     if (prev !== curr) crossings++;
     comparisons++;
   }
@@ -200,8 +229,8 @@ function calculateSpectralFlux(samples) {
     const start = w * windowSize;
     const spectrum = new Array(windowSize / 2).fill(0);
     for (let i = 0; i < windowSize; i += 2) {
-      const re = (samples[start + i] - 128) / 128;
-      const im = i + 1 < windowSize ? (samples[start + i + 1] - 128) / 128 : 0;
+      const re = samples[start + i];
+      const im = i + 1 < windowSize ? samples[start + i + 1] : 0;
       spectrum[Math.floor(i / 2)] = Math.sqrt(re * re + im * im);
     }
     spectra.push(spectrum);
@@ -233,7 +262,7 @@ function calculateMFCCApprox(samples, sampleRate = 16000) {
     const start = w * windowSize;
     const window = new Float32Array(windowSize);
     for (let i = 0; i < windowSize; i++) {
-      const normalized = (samples[start + i] - 128) / 128;
+      const normalized = samples[start + i];
       const hann = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (windowSize - 1)));
       window[i] = normalized * hann;
     }
@@ -393,21 +422,22 @@ export function combineFrames(frameBuffers) {
 
 /**
  * Generate a waveform visualization array from audio frames.
+ * 帧同为 16-bit LE PCM，需先解码为归一化采样再取幅度，否则波形与真实音量不符。
  */
 export function generateWaveform(frameBuffer, numPoints = 20) {
-  const bytes = new Uint8Array(frameBuffer);
-  const step = Math.max(1, Math.floor(bytes.length / numPoints));
+  const samples = decodePcm16(frameBuffer);
+  const step = Math.max(1, Math.floor(samples.length / numPoints));
   const points = [];
 
-  for (let i = 0; i < bytes.length; i += step) {
+  for (let i = 0; i < samples.length; i += step) {
     let sum = 0;
     let count = 0;
-    for (let j = i; j < Math.min(i + step, bytes.length); j++) {
-      sum += Math.abs(bytes[j] - 128);
+    for (let j = i; j < Math.min(i + step, samples.length); j++) {
+      sum += Math.abs(samples[j]); // 归一化幅度 0..1
       count++;
     }
     const avg = count > 0 ? sum / count : 0;
-    points.push(Math.min(avg / 64, 1));
+    points.push(Math.min(avg * 3, 1)); // 放大系数，让正常语音幅度可视
   }
 
   return points.slice(-numPoints);
