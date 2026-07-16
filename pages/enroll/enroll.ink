@@ -48,11 +48,19 @@ import { extractFeatures, createTemplate } from '../../utils/voiceprint-engine.j
 import { setupRecorderListeners, startRecordingSession, stopRecordingSession } from '../../utils/recording-session.js';
 import { speak } from '../../utils/tts.js';
 
+// 录音有效性门槛：低于此值视为「没采到有效音频」，不计入样本，避免坏样本污染声纹模板。
+// MIN_AUDIO_BYTES 约 50ms（16000Hz·16bit·单声道 = 32 字节/ms）；MIN_ENERGY 挡近全静音。
+const MIN_AUDIO_BYTES = 1600;
+const MIN_ENERGY = 1e-6;
+
 export default {
   data: {
     status: '准备就绪 - 点击下方按钮开始录音',
     isRecording: false,
     recorded: false,
+    // 本次录音待定特征：录完暂存于此，点「保存样本」才正式计入 sampleFeatures，
+    // 从而让 sampleCount 与真正入库的有效特征数严格一致（废弃的重录不会污染模板）。
+    pendingFeature: null,
     // 预计算：进度点与录音状态样式类（避免模板三元式告警）
     progressDots: ['', '', ''],
     recordingClass: '',
@@ -74,6 +82,7 @@ export default {
     console.log('注册页面加载 - 无障碍模式');
     // 重置样本累积
     this.data.sampleFeatures = [];
+    this.data.pendingFeature = null;
     this.data._finalized = false;
     // 初始化录音管理器（安全获取，不同运行时 API 位置不同）
     this.recorderManager = acquireRecorderManager();
@@ -122,15 +131,26 @@ export default {
           }
         },
         (combinedAudio) => {
-          // 语音提示：录音完成
-          speak('录音完成');
-          // 提取本次录音的声纹特征，累积用于生成模板
+          const that = this;
+          // 提取本次录音特征，并校验有效性（太短 / 静音则不计入，避免坏样本污染模板）
+          let features = null;
           try {
-            const features = extractFeatures(combinedAudio);
-            this.data.sampleFeatures.push(features);
+            features = extractFeatures(combinedAudio);
           } catch (e) {
             console.log('提取特征失败: ' + e);
           }
+          const tooShort = !combinedAudio || combinedAudio.length < MIN_AUDIO_BYTES;
+          const silent = !features || !(features.meanEnergy > MIN_ENERGY);
+          if (tooShort || silent) {
+            // 本次录音无效：清掉待定特征、退回未录状态，提示重录
+            that.data.pendingFeature = null;
+            that.setData({ recorded: false, status: '没录到清晰声音，请靠近麦克风重录' });
+            speak('没录到清晰声音，请重录');
+            return;
+          }
+          // 有效：暂存，待「保存样本」正式计入
+          that.data.pendingFeature = features;
+          speak('录音完成，请保存');
         }
       );
     },
@@ -138,13 +158,16 @@ export default {
     saveVoiceprint() {
       const that = this;
 
-      if (!that.data.recorded) {
-        that.setData({ status: '请先完成录音' });
+      if (!that.data.recorded || !that.data.pendingFeature) {
+        that.setData({ status: '请先完成一次有效录音' });
         speak('请先完成录音');
         return;
       }
 
-      const newCount = that.data.sampleCount + 1;
+      // 此刻才把待定特征正式计入，保证 sampleCount 恒等于入库的有效特征数
+      that.data.sampleFeatures.push(that.data.pendingFeature);
+      that.data.pendingFeature = null;
+      const newCount = that.data.sampleFeatures.length;
       that.setData({
         sampleCount: newCount,
         recorded: false,
@@ -177,21 +200,29 @@ export default {
     // 手动完成注册：用全部已录样本生成模板并入库（支持超过 3 个样本）
     finishEnroll() {
       const that = this;
-      if (that.data.sampleCount < 3) {
-        that.setData({ status: '至少录制 3 个样本后再完成' });
+      // 门槛以「实际有效特征数」为准（与 sampleCount 一致）
+      if (that.data.sampleFeatures.length < 3) {
+        that.setData({ status: '至少录制并保存 3 个有效样本后再完成' });
         speak('至少录制3个样本');
         return;
       }
       if (that.data._finalized) return;
-      that.data._finalized = true;
 
-      // 用全部样本生成声纹模板，并持久化到 voiceprint_db
+      // 用全部样本生成声纹模板
       let template = null;
       try {
         template = createTemplate(that.data.sampleFeatures);
       } catch (e) {
         console.log('生成模板失败: ' + e);
       }
+      // 模板无效则中止入库：绝不存进 template:null 的「空模板用户」——
+      // 否则验证时会被 identifySpeaker 跳过，表现为「注册成功却永远验证不了」。
+      if (!template) {
+        that.setData({ status: '声纹生成失败，请重新录制样本' });
+        speak('声纹生成失败，请重试');
+        return;
+      }
+      that.data._finalized = true;
 
       const db = wx.getStorageSync('voiceprint_db') || { users: [] };
       if (!db.users) db.users = [];

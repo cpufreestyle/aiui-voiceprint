@@ -62,6 +62,10 @@ import { extractFeatures, identifySpeaker } from '../../utils/voiceprint-engine.
 import { setupRecorderListeners, startRecordingSession, stopRecordingSession } from '../../utils/recording-session.js';
 import { speak } from '../../utils/tts.js';
 
+// 录音有效性门槛（与注册页一致）：低于此值视为「没采到有效音频」，不进入比对。
+const MIN_AUDIO_BYTES = 1600;
+const MIN_ENERGY = 1e-6;
+
 export default {
   data: {
     status: '准备就绪 - 点击下方按钮开始验证',
@@ -134,6 +138,22 @@ export default {
           features = extractFeatures(audioData || new Uint8Array(0));
         } catch (e) {
           console.log('提取特征失败: ' + e);
+        }
+
+        // 录音无效（太短 / 静音）直接提示重试，不进入比对——
+        // 否则全 0 特征会给出误导性分数（可能误判成功或以假分数拒绝）。
+        const tooShort = !audioData || audioData.length < MIN_AUDIO_BYTES;
+        const silent = !features || !(features.meanEnergy > MIN_ENERGY);
+        if (tooShort || silent) {
+          const invalid = {
+            success: false,
+            confidence: '0.00',
+            message: '没录到清晰声音，请重试',
+            timestamp: new Date().toLocaleString()
+          };
+          that.setData({ status: invalid.message, result: invalid, statusBoxClass: 'failed' });
+          speak('没录到清晰声音，请重试');
+          return;
         }
 
         const db = wx.getStorageSync('voiceprint_db');
