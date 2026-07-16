@@ -1,0 +1,10 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Dependencies (npm install adds node_modules)
+node_modules/
+
+# Logs / temp
+*.log
+.cache/

@@ -1,0 +1,21 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/enroll/enroll",
+    "pages/verify/verify",
+    "pages/result/result",
+    "pages/conversation/conversation"
+  ],
+  "window": {
+    "navigationBarTitleText": "听障助手",
+    "viewport": {
+      "width": "device-width"
+    }
+  },
+  "permissions": [
+    "microphone",
+    "network",
+    "audio",
+    "storage"
+  ]
+}

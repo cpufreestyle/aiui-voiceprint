@@ -1,0 +1,7 @@
+{
+  "name": "voiceprint-recognition",
+  "version": "1.0.0",
+  "description": "AIUI Agent for voiceprint recognition and speaker identification",
+  "main": "app.js",
+  "dependencies": {}
+}
