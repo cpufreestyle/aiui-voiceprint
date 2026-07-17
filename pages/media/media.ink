@@ -72,6 +72,8 @@ export default {
     captureModeText: '切换到录像',
     isRecording: false,
     recordBtnText: '开始录像',
+    // 预计算录像按钮样式类，避免模板三元式触发 ink 静态检查告警
+    recordBtnClass: '',
     count: 0,
     countText: '已采集 0 / ' + MAX_ITEMS + '（至少 ' + MIN_ITEMS + '）',
     canDescribe: false,
@@ -225,7 +227,7 @@ export default {
       if (that.data.isRecording) that.stopVideo();
     })
       .then(function () {
-        that.setData({ isRecording: true, recordBtnText: '停止录像', caption: '录像中…', hint: '再按一次停止' });
+        that.setData({ isRecording: true, recordBtnText: '停止录像', recordBtnClass: 'recording', caption: '录像中…', hint: '再按一次停止' });
         that.vibrate();
         speak('开始录像');
       })
@@ -238,7 +240,7 @@ export default {
 
   stopVideo() {
     const that = this;
-    this.setData({ isRecording: false, recordBtnText: '开始录像', hint: '正在保存视频…' });
+    this.setData({ isRecording: false, recordBtnText: '开始录像', recordBtnClass: '', hint: '正在保存视频…' });
     stopRecord(this.data.cameraCtx, { compressed: true })
       .then(function (res) { return that.ingestVideo(res.tempVideoPath, res.tempThumbPath); })
       .catch(function (e) {
@@ -412,6 +414,7 @@ export default {
       isFull: false,
       isRecording: false,
       recordBtnText: '开始录像',
+      recordBtnClass: '',
       caption: '重新开始采集',
       hint: '短按拍照，滑动切换拍照/录像'
     });
@@ -560,7 +563,7 @@ export default {
         <text class="op-main">拍照</text>
         <text class="op-sub">采集一张图片（≤5MB）</text>
       </button>
-      <button class="op-btn record {{isRecording ? 'recording' : ''}}" bindtap="onToggleRecord" wx:if="{{captureMode === 'video'}}">
+      <button class="op-btn record {{recordBtnClass}}" bindtap="onToggleRecord" wx:if="{{captureMode === 'video'}}">
         <text class="op-main">{{recordBtnText}}</text>
         <text class="op-sub">采集一段视频（≤50MB）</text>
       </button>
