@@ -51,6 +51,11 @@ import { extractFeatures, createTemplate, identifySpeaker, combineFrames, genera
 import { initAsr, startAsr, stopAsr, takeLatestText, asrMode, isAsrAvailable } from '../../utils/asr.js';
 import { speak, toggleVoicePrompt, isVoicePromptOn } from '../../utils/tts.js';
 
+// 录音有效性门槛（与注册页/验证页一致）：低于此值视为「没采到有效音频」，
+// 不建模、不入库、不参与识别，避免静音/太短坏样本污染共享的 voiceprint_db。
+const MIN_AUDIO_BYTES = 1600;
+const MIN_ENERGY = 1e-6;
+
 export default {
   data: {
     isListening: false,
@@ -407,9 +412,17 @@ export default {
     let isKnown = false;
     let unknownKey = null;
 
-    if (audio && audio.length) {
+    // 无效录音门槛（与注册/验证页一致）：太短或静音的音频不做声纹身份，
+    // 避免全 0 特征建出假陌生人、更避免被起名入库污染共享声纹库。
+    const longEnough = audio && audio.length >= MIN_AUDIO_BYTES;
+    if (longEnough) {
       let features = null;
       try { features = extractFeatures(audio); } catch (e) { console.log('提取特征失败: ' + e); }
+
+      // 静音/能量过低：丢弃该段声纹身份（不建陌生人、不可起名），字幕仍照常显示文字
+      if (!features || !(features.meanEnergy > MIN_ENERGY)) {
+        features = null;
+      }
 
       const db = wx.getStorageSync('voiceprint_db') || { users: [] };
       if (features && db.users && db.users.length) {
@@ -529,6 +542,23 @@ export default {
     const unknown = that.data.unknownSpeakers.find((x) => x.key === key);
     if (!unknown) return;
 
+    // 0) 入库前校验（与注册页一致）：特征无效或模板生成失败则中止入库——
+    //    绝不把 template:null / 静音退化模板写进共享声纹库，否则表现为
+    //    「起名成功却永远识别不了」，还会污染 verify 页的比对。
+    const f = unknown.features;
+    if (!f || !(f.meanEnergy > MIN_ENERGY)) {
+      wx.showToast({ title: '该段声音太弱，无法建声纹，请让其再说一句', icon: 'none', duration: 2000 });
+      speak('声音太弱，无法起名');
+      return;
+    }
+    let template = null;
+    try { template = createTemplate([f]); } catch (e) { console.log('生成模板失败: ' + e); }
+    if (!template) {
+      wx.showToast({ title: '声纹生成失败，请让其再说一句后重试', icon: 'none', duration: 2000 });
+      speak('声纹生成失败，请重试');
+      return;
+    }
+
     // 1) 更新会话内标签，并重标历史字幕中同一陌生人
     unknown.label = name;
     const subs = that.data.subtitles.map((s) => {
@@ -539,8 +569,6 @@ export default {
     });
 
     // 2) 入库：用该陌生人这一句的特征生成声纹模板（单样本）
-    let template = null;
-    try { template = createTemplate([unknown.features]); } catch (e) { console.log('生成模板失败: ' + e); }
     const db = wx.getStorageSync('voiceprint_db') || { users: [] };
     if (!db.users) db.users = [];
     db.users.push({

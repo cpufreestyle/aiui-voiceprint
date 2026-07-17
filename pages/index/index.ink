@@ -62,6 +62,7 @@
 <script setup>
 import wx from 'wx';
 import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { getActiveUser, setActiveUser, reconcileActiveUser } from '../../utils/active-user.js';
 
 export default {
   data: {
@@ -73,11 +74,15 @@ export default {
     menuItems: [
       { key: 'enroll', label: '录入声纹', selectedClass: 'selected' },
       { key: 'verify', label: '验证身份', selectedClass: '' },
-      { key: 'conversation', label: '对话字幕', selectedClass: '' }
+      { key: 'conversation', label: '对话字幕', selectedClass: '' },
+      { key: 'media', label: '拍摄解说', selectedClass: '' }
     ],
     selectedIndex: 0,
     // 预计算文本，避免模板三元式触发 ink 静态检查告警（missing from data）
-    toggleText: '切换到网格'
+    toggleText: '切换到网格',
+    // 当前启用身份
+    activeUserId: '',
+    activeName: '未设置'
   },
 
   onLoad() {
@@ -118,6 +123,8 @@ export default {
       this.goToVerify();
     } else if (item.key === 'conversation') {
       this.goToConversation();
+    } else if (item.key === 'media') {
+      this.goToMedia();
     }
   },
   // 镜腿双击：退出（主页为顶层，尝试返回宿主/上一级）
@@ -171,14 +178,40 @@ export default {
         db.users = users;
         try { wx.setStorageSync('voiceprint_db', db); } catch (e) {}
       }
+      // 读取当前启用身份，并在列表上标注
+      reconcileActiveUser();
+      const active = getActiveUser();
+      const activeId = active ? active.id : '';
       this.setData({
         userCount: users.length,
+        activeUserId: activeId,
+        activeName: active ? active.name : '未设置',
         registeredUsers: users.map((u) => ({
           id: u.id,
           name: u.name,
-          enrolledAt: this.formatTime(u.enrolledAt)
+          enrolledAt: this.formatTime(u.enrolledAt),
+          isActive: u.id === activeId,
+          activeClass: u.id === activeId ? 'active' : '',
+          activeTag: u.id === activeId ? '当前' : '启用'
         }))
       });
+    } else {
+      this.setData({ userCount: 0, activeUserId: '', activeName: '未设置', registeredUsers: [] });
+    }
+  },
+
+  // 点击某个声纹卡片：设为当前启用身份，并刷新列表
+  switchActiveUser(event) {
+    const userId = event.currentTarget.dataset.id;
+    if (!userId || userId === this.data.activeUserId) return;
+    const user = setActiveUser(userId);
+    if (user) {
+      const app = getApp();
+      if (app && app.globalData && app.globalData.vibrationEnabled) {
+        try { wx.vibrateShort(); } catch (e) {}
+      }
+      this.setData({ statusText: '当前身份：' + user.name });
+      this.loadVoiceprintDB();
     }
   },
 
@@ -197,6 +230,12 @@ export default {
   goToConversation() {
     wx.navigateTo({
       url: '/pages/conversation/conversation'
+    });
+  },
+
+  goToMedia() {
+    wx.navigateTo({
+      url: '/pages/media/media'
     });
   },
 
@@ -225,6 +264,7 @@ export default {
     if (db && db.users) {
       db.users = db.users.filter((u) => u.id !== userId);
       wx.setStorageSync('voiceprint_db', db);
+      reconcileActiveUser(); // 若删掉的是当前身份，清空启用标记
       this.loadVoiceprintDB();
     }
   },
@@ -257,6 +297,10 @@ export default {
         <text class="status-label">已注册用户</text>
         <text class="status-value">{{userCount}}</text>
       </view>
+      <view class="status-row" ink:if="{{userCount > 0}}">
+        <text class="status-label">当前身份</text>
+        <text class="status-value active-name">{{activeName}}</text>
+      </view>
     </view>
 
     <view class="action-row">
@@ -276,22 +320,28 @@ export default {
     </view>
 
     <view class="users-section" ink:if="{{userCount > 0}}">
-      <text class="section-title">已注册声纹</text>
+      <text class="section-title">已注册声纹（点击切换当前身份）</text>
       
       <scroll-view class="user-list" scroll-y="true" ink:if="{{viewMode === 'list'}}">
-        <view class="user-card" ink:for="{{registeredUsers}}" ink:key="id">
-          <view class="user-info">
+        <view class="user-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id">
+          <view class="user-info" bindtap="switchActiveUser" data-id="{{item.id}}">
             <text class="user-name">{{item.name}}</text>
             <text class="user-time">{{item.enrolledAt}}</text>
           </view>
-          <button class="btn-delete" bindtap="deleteUser" data-id="{{item.id}}">
-            <text>删除</text>
-          </button>
+          <view class="user-actions">
+            <button class="btn-switch {{item.activeClass}}" bindtap="switchActiveUser" data-id="{{item.id}}">
+              <text>{{item.activeTag}}</text>
+            </button>
+            <button class="btn-delete" bindtap="deleteUser" data-id="{{item.id}}">
+              <text>删除</text>
+            </button>
+          </view>
         </view>
       </scroll-view>
 
       <view class="user-grid" ink:if="{{viewMode === 'grid'}}">
-        <view class="grid-card" ink:for="{{registeredUsers}}" ink:key="id" bindtap="deleteUser" data-id="{{item.id}}">
+        <view class="grid-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id" bindtap="switchActiveUser" data-id="{{item.id}}">
+          <text class="grid-tag" ink:if="{{item.isActive}}">当前</text>
           <text class="grid-name">{{item.name}}</text>
           <text class="grid-time">{{item.enrolledAt}}</text>
         </view>
@@ -350,6 +400,13 @@ export default {
   color: var(--color-text-secondary, rgba(64, 255, 94, 0.6));
 }
 
+.version {
+  font-size: 11px;
+  margin-top: 4px;
+  letter-spacing: 1px;
+  color: var(--color-text-secondary, rgba(64, 255, 94, 0.45));
+}
+
 .status-card {
   display: flex;
   flex-direction: column;
@@ -377,6 +434,10 @@ export default {
   font-weight: bold;
   color: #7DFF90;
   text-shadow: 0 0 6px rgba(64, 255, 94, 0.7);
+}
+
+.active-name {
+  color: #FFFFFF;
 }
 
 .action-row {
@@ -459,10 +520,45 @@ export default {
   margin-bottom: 6px;
 }
 
+.user-card.active {
+  border-color: #40FF5E;
+  background-color: rgba(64, 255, 94, 0.14);
+}
+
 .user-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+}
+
+.user-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-switch {
+  padding: 6px 12px;
+  background-color: transparent;
+  border: 1px solid var(--color-primary-60, rgba(64, 255, 94, 0.6));
+  border-radius: 6px;
+}
+
+.btn-switch text {
+  font-size: 11px;
+  color: var(--color-primary, #40FF5E);
+}
+
+.btn-switch.active {
+  background-color: #40FF5E;
+  border-color: #40FF5E;
+}
+
+.btn-switch.active text {
+  color: #000000;
+  font-weight: bold;
 }
 
 .user-name {
@@ -505,6 +601,21 @@ export default {
   border: var(--border-width-thin, 1px) solid var(--border-color-muted, rgba(64, 255, 94, 0.2));
   border-radius: var(--radius-sm, 8px);
   gap: 4px;
+}
+
+.grid-card.active {
+  border-color: #40FF5E;
+  background-color: rgba(64, 255, 94, 0.14);
+}
+
+.grid-tag {
+  font-size: 10px;
+  font-weight: bold;
+  color: #000000;
+  background-color: #40FF5E;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 2px;
 }
 
 .grid-name {

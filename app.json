@@ -4,7 +4,8 @@
     "pages/enroll/enroll",
     "pages/verify/verify",
     "pages/result/result",
-    "pages/conversation/conversation"
+    "pages/conversation/conversation",
+    "pages/media/media"
   ],
   "window": {
     "navigationBarTitleText": "听障助手",
@@ -16,6 +17,7 @@
     "microphone",
     "network",
     "audio",
-    "storage"
+    "storage",
+    "camera"
   ]
 }
