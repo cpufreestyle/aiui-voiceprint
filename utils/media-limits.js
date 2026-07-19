@@ -2,7 +2,7 @@
  * 拍摄解说 · 媒体限制与多模态 payload 纯逻辑
  *
  * 本模块零平台依赖（不 import wx），只放「常量 + 纯函数」，因此可直接用 node 冒烟测试。
- * 负责：数量/大小硬约束、base64 字节估算、智谱 GLM-4V（OpenAI 兼容）请求体构造与响应解析、
+ * 负责：数量/大小硬约束、base64 字节估算、Agnes AI（OpenAI 兼容）请求体构造与响应解析、
  * 以及未配置视觉模型时的演示解说文本。
  *
  * 需求约束（用户指定）：
@@ -109,8 +109,8 @@ export function isFull(count) {
 }
 
 /**
- * 构造智谱 GLM-4V（OpenAI 兼容 /chat/completions）单张图片请求体。
- * @param {string} model  模型名（如 glm-4v-plus / glm-4v）
+ * 构造 Agnes AI（OpenAI 兼容 /chat/completions）单张图片请求体。
+ * @param {string} model  模型名（如 agnes-2.0-flash）
  * @param {string} dataUrl data:image/...;base64,xxx 或纯 base64
  * @param {string} [prompt]
  * @returns {object} 可直接 JSON.stringify 作为 wx.request 的 data
@@ -149,7 +149,7 @@ export function buildVideoRequest(model, frameDataUrls, prompt) {
 }
 
 /**
- * 从智谱 / OpenAI 兼容响应体中取出解说文字。
+ * 从 Agnes / OpenAI 兼容响应体中取出解说文字。
  * 兼容 content 为字符串或分段数组两种形态；取不到返回 null。
  * @param {object} data wx.request success 回调里的 res.data
  * @returns {string|null}

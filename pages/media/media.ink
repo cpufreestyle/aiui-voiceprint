@@ -1,7 +1,7 @@
 <script def>
 {
   "navigationBarTitleText": "拍摄解说 - 无障碍版",
-  "description": "眼镜拍摄照片/视频并用多模态大模型（智谱 GLM-4V）解说画面内容，再语音播报 + 大字幕呈现。为听障/需要用眼睛替代的人群优化：一次采集 3~5 项，单图≤5MB、单视频≤50MB。",
+  "description": "眼镜拍摄照片/视频并用多模态大模型（Agnes AI）解说画面内容，再语音播报 + 大字幕呈现。为听障/需要用眼睛替代的人群优化：一次采集 3~5 项，单图≤5MB、单视频≤50MB。",
   "schema": {
     "data": {
       "type": "object",
@@ -128,7 +128,7 @@ export default {
   refreshVisionBadge() {
     const live = isVisionConfigured();
     this.setData({
-      visionModeText: live ? 'GLM-4V 在线' : '演示模式',
+      visionModeText: live ? 'Agnes 在线' : '演示模式',
       visionBadgeClass: live ? 'live' : 'demo'
     });
   },
@@ -347,7 +347,7 @@ export default {
     this.setData({
       wizardStep: 'describing',
       caption: '正在解说画面内容',
-      hint: live ? '智谱 GLM-4V 识别中，请稍候' : '演示模式（未配置视觉模型），展示演示解说'
+      hint: live ? 'Agnes 视觉模型识别中，请稍候' : '演示模式（未配置视觉模型），展示演示解说'
     });
     speak(live ? '开始解说，正在识别画面' : '开始演示解说');
     this.describeAt(0);
@@ -394,7 +394,7 @@ export default {
     this.setData({
       wizardStep: 'result',
       caption: '解说完成',
-      hint: live ? '以上为 GLM-4V 识别结果 ｜ 双击退出 ｜ 短按返回主页' : '以上为演示解说 ｜ 填入 API Key 可获得真实识别 ｜ 双击退出'
+      hint: live ? '以上为 Agnes 识别结果 ｜ 双击退出 ｜ 短按返回主页' : '以上为演示解说 ｜ 填入 API Key 可获得真实识别 ｜ 双击退出'
     });
     this.vibrate();
     speak('解说完成');
@@ -529,16 +529,16 @@ export default {
       </view>
     </view>
 
-    <!-- 视觉设置面板：填入智谱 API Key -->
+    <!-- 视觉设置面板：填入 Agnes API Key -->
     <view class="vision-setting" wx:if="{{showVisionSetting}}">
-      <text class="vs-title">视觉模型设置（智谱 GLM-4V）</text>
+      <text class="vs-title">视觉模型设置（Agnes AI）</text>
       <text class="vs-line">当前密钥：{{apiKeyMasked}}</text>
-      <input class="vs-input" type="text" password="{{true}}" placeholder="粘贴智谱 API Key" bindinput="onApiKeyInput" />
+      <input class="vs-input" type="text" password="{{true}}" placeholder="粘贴 Agnes API Key（sk-...）" bindinput="onApiKeyInput" />
       <view class="vs-btns">
         <button class="vs-save" bindtap="saveApiKey"><text>保存密钥</text></button>
         <button class="vs-clear" bindtap="clearApiKey"><text>清除</text></button>
       </view>
-      <text class="vs-note">未填写时为演示模式；填入后拍摄内容将由 GLM-4V 真实识别解说。</text>
+      <text class="vs-note">未填写时为演示模式；填入后拍摄内容将由 Agnes 视觉模型真实识别解说。</text>
     </view>
 
     <!-- 主字幕 -->
