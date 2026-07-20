@@ -20,30 +20,62 @@ import wx from 'wx';
 import {
   buildImageRequest, buildVideoRequest, parseVisionText, demoDescription
 } from './media-limits.js';
+import { AGNES_API_KEY, AGNES_BASE_URL, AGNES_VISION_MODEL } from './cloud-ai.js';
 
 const STORAGE_KEY = 'vision_config';
 
-// 默认配置：预填 Agnes AI 网关与模型；apiKey 留空（=演示模式），由用户在设置里填入。
-// agnes-2.0-flash 为多模态理解模型（已实测支持 image_url + base64 图片识别）。
+// 默认配置：统一读 cloud-ai.js 的内置 Agnes Key/网关/模型（测试版无需在眼镜端填 Key）。
+// 用户仍可在设置面板临时覆盖（storage 优先级高于此默认），但测试版通常不需要。
 const DEFAULT_CONFIG = {
-  baseUrl: 'https://apihub.agnes-ai.com/v1/chat/completions',
-  apiKey: '',
-  model: 'agnes-2.0-flash'
+  baseUrl: AGNES_BASE_URL,
+  apiKey: AGNES_API_KEY,
+  model: AGNES_VISION_MODEL
 };
 
 const REQUEST_TIMEOUT_MS = 20000;
 
+// 图形识别结构化 prompt（用例B：拍照识别图形，见 docs/架构-语音直呼集成.md §4.1）。
+// 服务对象仍是听障用户，但目标从「整体解说画面」换成「结构化拆解一个图形/物体」。
+const SHAPE_PROMPT =
+  '你是视觉结构分析助手，服务对象是听障用户，请分析这张照片中的主要图形/物体，' +
+  '严格按以下结构输出（没有的项写"无"，不要输出多余寒暄）：\n' +
+  '【类别】图形/物体是什么（如：三角形标志、机械零件、流程图、建筑立面）\n' +
+  '【形状构成】由哪些基本形状组成（圆/方/三角/多边形/曲线），各自数量与嵌套关系\n' +
+  '【尺寸比例】各部分相对大小与比例关系（如：主体占画面约2/3，左圆约为右方形的一半）\n' +
+  '【颜色】主要颜色及分布位置\n' +
+  '【文字】图上出现的所有文字，逐条列出\n' +
+  '【空间关系】各元素的上下左右/包含/相交关系\n' +
+  '【可能用途】这个图形/物体最可能是什么、用来做什么（给1-2个推断并说明依据）\n' +
+  '语言简洁，总长不超过300字，适合语音播报。';
+
+// 图形识别专用演示文案（未配置视觉模型 / 请求失败时使用，明确标注，绝不冒充真实识别结果）
+const SHAPE_DEMO_TEXTS = [
+  '演示解说：【类别】几何图形示意图（未配置视觉模型，此为演示文本）\n' +
+  '【形状构成】一个圆形与两个三角形\n【尺寸比例】圆形直径约占画面一半，三角形分列两侧，各约为圆形的三分之一\n' +
+  '【颜色】黑白线条为主\n【文字】无\n【空间关系】两个三角形分别位于圆形左右两侧，互不重叠\n' +
+  '【可能用途】常见于教学示意图，用于讲解几何关系',
+  '演示解说：【类别】流程图卡片（未配置视觉模型，此为演示文本）\n' +
+  '【形状构成】三个矩形与连接箭头\n【尺寸比例】三个矩形大小接近，纵向排列\n' +
+  '【颜色】以蓝白配色为主\n【文字】"开始""处理""结束"三个词\n【空间关系】矩形自上而下依次由箭头连接\n' +
+  '【可能用途】用于展示一个简单流程的三个步骤'
+];
+
 let _demoIdx = 0;
+let _shapeDemoIdx = 0;
 
 function requestAvailable() {
   return typeof wx !== 'undefined' && wx && typeof wx.request === 'function';
 }
 
-/** 读取当前视觉配置（storage 覆盖默认值）。 */
+/** 读取当前视觉配置（storage 覆盖默认值；但 storage 里 Key 为空时回退到内置 Key）。 */
 export function getVisionConfig() {
   let saved = null;
   try { saved = wx.getStorageSync(STORAGE_KEY); } catch (e) {}
-  return Object.assign({}, DEFAULT_CONFIG, saved || {});
+  const cfg = Object.assign({}, DEFAULT_CONFIG, saved || {});
+  // 内置测试 Key 兜底：避免历史「清除密钥」在 storage 留下空串把内置 Key 覆盖成空。
+  if (!cfg.apiKey) cfg.apiKey = AGNES_API_KEY;
+  if (!cfg.baseUrl) cfg.baseUrl = AGNES_BASE_URL;
+  return cfg;
 }
 
 /** 写入/合并视觉配置（如只更新 apiKey）。返回合并后的配置。 */
@@ -113,27 +145,47 @@ function postVision(cfg, body) {
   });
 }
 
+// 内部薄封装：单图请求的「构造 body → postVision → 失败降级为演示文案」共用路径。
+// describeImage / describeShape 都是它的薄封装，只是 prompt 与演示文案来源不同——
+// 不复制请求/降级逻辑（要求见任务说明）。
+// @param {string} dataUrl
+// @param {string} [prompt] 传给 buildImageRequest 的自定义 prompt；不传则用其内置默认 IMAGE_PROMPT
+// @param {Function} demoTextFn 生成演示文案的函数（未配置/失败时调用）
+function requestImageDescription(dataUrl, prompt, demoTextFn) {
+  const cfg = getVisionConfig();
+  if (!isVisionConfigured() || !dataUrl) {
+    return Promise.resolve({ ok: true, text: demoTextFn(), mode: 'demo' });
+  }
+  const body = buildImageRequest(cfg.model, dataUrl, prompt);
+  return postVision(cfg, body)
+    .then((text) => ({ ok: true, text: text, mode: 'live' }))
+    .catch((e) => ({
+      ok: false,
+      text: demoTextFn(),
+      mode: 'demo',
+      error: (e && e.message) || String(e)
+    }));
+}
+
 /**
- * 解说一张图片。
+ * 解说一张图片（通用画面解说）。
  * @param {string} dataUrl data:image/...;base64,xxx 或纯 base64
  * @returns {Promise<{ok:boolean, text:string, mode:'live'|'demo', error?:string}>}
  *          永不 reject：真机失败会自动降级为演示文本并带 error 说明。
  */
 export function describeImage(dataUrl) {
-  const cfg = getVisionConfig();
-  if (!isVisionConfigured() || !dataUrl) {
-    const text = demoDescription('image', _demoIdx++);
-    return Promise.resolve({ ok: true, text: text, mode: 'demo' });
-  }
-  const body = buildImageRequest(cfg.model, dataUrl);
-  return postVision(cfg, body)
-    .then((text) => ({ ok: true, text: text, mode: 'live' }))
-    .catch((e) => ({
-      ok: false,
-      text: demoDescription('image', _demoIdx++),
-      mode: 'demo',
-      error: (e && e.message) || String(e)
-    }));
+  return requestImageDescription(dataUrl, undefined, () => demoDescription('image', _demoIdx++));
+}
+
+/**
+ * 识别一张图形/物体照片，输出结构化【类别/形状构成/尺寸比例/颜色/文字/空间关系/可能用途】。
+ * 用例B：拍照识别图形（见 docs/架构-语音直呼集成.md §4.1）。与 describeImage 共用同一条
+ * postVision 请求 + demo 降级路径，仅 prompt 与演示文案不同。
+ * @param {string} dataUrl data:image/...;base64,xxx 或纯 base64
+ * @returns {Promise<{ok:boolean, text:string, mode:'live'|'demo', error?:string}>}
+ */
+export function describeShape(dataUrl) {
+  return requestImageDescription(dataUrl, SHAPE_PROMPT, () => SHAPE_DEMO_TEXTS[_shapeDemoIdx++ % SHAPE_DEMO_TEXTS.length]);
 }
 
 /**

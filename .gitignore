@@ -8,3 +8,7 @@ node_modules/
 # Logs / temp
 *.log
 .cache/
+
+# Python
+__pycache__/
+*.pyc

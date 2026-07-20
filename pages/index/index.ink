@@ -51,6 +51,22 @@
         "selectedIndex": {
           "type": "number",
           "description": "当前高亮选中的菜单项索引"
+        },
+        "asrModeText": {
+          "type": "string",
+          "description": "app 内常听语音识别的模式徽章文案（Rokid ASR / 演示模式 / 不可用提示）"
+        },
+        "listening": {
+          "type": "boolean",
+          "description": "是否正在监听语音指令（识别器 onStart~onStop 之间）"
+        },
+        "listeningClass": {
+          "type": "string",
+          "description": "预计算的监听中样式类（active 或空），避免模板三元式"
+        },
+        "voiceHint": {
+          "type": "string",
+          "description": "最近一次语音识别结果或指令反馈提示文案"
         }
       },
       "required": ["userCount", "status", "statusText", "registeredUsers", "viewMode"]
@@ -63,6 +79,9 @@
 import wx from 'wx';
 import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
 import { getActiveUser, setActiveUser, reconcileActiveUser } from '../../utils/active-user.js';
+import { initAsr, startAsr, stopAsr, isAsrAvailable, asrMode } from '../../utils/asr.js';
+import { speak } from '../../utils/tts.js';
+import { routeIntent } from '../../utils/intent-router.js';
 
 export default {
   data: {
@@ -71,18 +90,24 @@ export default {
     statusText: '就绪',
     registeredUsers: [],
     viewMode: 'list',
+    // 默认聚焦「拍照识别」（首项 + selectedIndex=0），其余三项按语音常用度排列
     menuItems: [
-      { key: 'enroll', label: '录入声纹', selectedClass: 'selected' },
-      { key: 'verify', label: '验证身份', selectedClass: '' },
+      { key: 'media', label: '拍照识别', selectedClass: 'selected' },
       { key: 'conversation', label: '对话字幕', selectedClass: '' },
-      { key: 'media', label: '拍摄解说', selectedClass: '' }
+      { key: 'enroll', label: '录入声纹', selectedClass: '' },
+      { key: 'verify', label: '验证身份', selectedClass: '' }
     ],
     selectedIndex: 0,
     // 预计算文本，避免模板三元式触发 ink 静态检查告警（missing from data）
     toggleText: '切换到网格',
     // 当前启用身份
     activeUserId: '',
-    activeName: '未设置'
+    activeName: '未设置',
+    // ====== app 内常听语音控制（见 setupVoiceControl）======
+    asrModeText: '',
+    listening: false,
+    listeningClass: '',
+    voiceHint: ''
   },
 
   onLoad() {
@@ -94,10 +119,12 @@ export default {
   onShow() {
     this.loadVoiceprintDB();
     installKeyboardFallback(this);
+    this.setupVoiceControl();
   },
 
   onHide() {
     removeKeyboardFallback(this);
+    this.teardownVoiceControl();
   },
 
   onKeyDown(event) {
@@ -216,27 +243,150 @@ export default {
   },
 
   goToEnroll() {
+    // 离开主页前先停常听，避免与目标页自己的 ASR 抢占同一个识别器单例
+    this.teardownVoiceControl();
     wx.navigateTo({
       url: '/pages/enroll/enroll'
     });
   },
 
   goToVerify() {
+    this.teardownVoiceControl();
     wx.navigateTo({
       url: '/pages/verify/verify'
     });
   },
 
   goToConversation() {
+    this.teardownVoiceControl();
     wx.navigateTo({
       url: '/pages/conversation/conversation'
     });
   },
 
+  // 进入图形识别模式：选中/短按进入时不自动拍照，让用户先取景，
+  // 语音「开始拍照」走 startShootByVoice() 直接自动拍
   goToMedia() {
+    this.teardownVoiceControl();
     wx.navigateTo({
-      url: '/pages/media/media'
+      url: '/pages/media/media?mode=shape'
     });
+  },
+
+  // 语音「开始拍照」直达：进入图形识别页并自动拍照 + 分析（autoStart=1）
+  startShootByVoice() {
+    this.teardownVoiceControl();
+    wx.navigateTo({
+      url: '/pages/media/media?mode=shape&autoStart=1'
+    });
+  },
+
+  // ====== 语音控制（app 内 ASR 常听：不依赖系统语音路由，自己听自己拍）======
+
+  // 进入主页即开始常听语音指令；无 ASR 能力（仿真/非 Rokid 设备）时诚实降级为
+  // 「仅滑动 + 短按」提示，不阻塞、不静默卡死原有手势路径。
+  setupVoiceControl() {
+    if (!isAsrAvailable()) {
+      this.setData({ asrModeText: '语音不可用，用滑动+短按', listening: false, listeningClass: '' });
+      // 诚实播报：无 ASR 能力时不能说"说话即可"，改为提示用滑动+短按操作
+      speak('已进入听障助手，当前默认拍照识别，语音识别当前不可用，请用滑动选择、短按进入');
+      return;
+    }
+    const that = this;
+    this._voiceActive = true;
+    initAsr({
+      onStart: function () {
+        that.setData({ listening: true, listeningClass: 'active' });
+      },
+      onFinal: function (text) {
+        that.setData({ listening: false, listeningClass: '' });
+        const navigated = that.onVoiceCommand(text);
+        // 未跳转（指令未命中导航类，或明确留在主页）才重新开始听下一句；
+        // 已跳转的话目标页面 onHide/onShow 会各自接管 ASR，这里不再抢着 restart。
+        if (!navigated) that.scheduleRestartAsr();
+      },
+      onError: function (err) {
+        console.log('[index] ASR 错误: ' + (err && err.message ? err.message : err));
+        that.setData({ listening: false, listeningClass: '' });
+        that.scheduleRestartAsr();
+      }
+    });
+    this.setData({ asrModeText: asrMode() === 'rokid' ? 'Rokid ASR 聆听中' : '演示模式（模拟语音）' });
+    startAsr({ lang: 'zh_CN' });
+    speak('已进入听障助手，当前默认拍照识别，说"开始拍照"即可，或说对话字幕、录入声纹、验证身份');
+  },
+
+  // 真机识别器每次 onStop（=一次 onFinal/onError）后需要重新 start 才能继续听下一句。
+  // 用 setTimeout 隔一拍再 start，避免在事件回调里同步重入 start 造成递归/时序问题。
+  scheduleRestartAsr() {
+    const that = this;
+    if (this._voiceRestartTimer) return;
+    this._voiceRestartTimer = setTimeout(function () {
+      that._voiceRestartTimer = null;
+      if (!that._voiceActive || !isAsrAvailable()) return;
+      startAsr({ lang: 'zh_CN' });
+    }, 400);
+  },
+
+  // 离开主页（onHide / 导航到子页面）时停止常听，避免和子页面自己的 ASR/相机抢占麦克风
+  teardownVoiceControl() {
+    this._voiceActive = false;
+    if (this._voiceRestartTimer) {
+      try { clearTimeout(this._voiceRestartTimer); } catch (e) {}
+      this._voiceRestartTimer = null;
+    }
+    stopAsr();
+  },
+
+  // 语音指令分类执行。返回 true 表示已跳转到其它页面（调用方不再 restart 常听），
+  // 返回 false/undefined 表示仍留在主页（继续常听下一句）。
+  onVoiceCommand(text) {
+    const raw = (text || '').trim();
+    if (!raw) {
+      this.setData({ voiceHint: '没听清，请再说一次' });
+      return false;
+    }
+    this.setData({ voiceHint: '听到："' + raw + '"' });
+
+    // 优先复用语音直呼意图路由器对 拍照(shape)/对话字幕(caption) 的判定，
+    // 与 OS 语音直呼技能共用同一套关键词规则，避免两处维护、逐渐漂移。
+    const route = routeIntent(raw);
+    if (route.mode === 'shape' && route.confidence >= 0.9) {
+      this.startShootByVoice();
+      return true;
+    }
+    if (route.mode === 'caption' && route.confidence >= 0.9) {
+      this.goToConversation();
+      return true;
+    }
+    if (route.mode === 'home' && route.confidence >= 0.9) {
+      // 明确说了「打开/进入听障助手」而已在主页：如实告知已在主页，而非误报"没听懂"
+      this.setData({ voiceHint: '已在听障助手主页' });
+      return false;
+    }
+
+    if (/录入|注册|声纹注册/.test(raw)) {
+      this.goToEnroll();
+      return true;
+    }
+    if (/验证/.test(raw)) {
+      this.goToVerify();
+      return true;
+    }
+    if (/下一个|下一项|切换/.test(raw)) {
+      this.handleSwipe('down');
+      this.setData({ voiceHint: '已切换到：' + this.data.menuItems[this.data.selectedIndex].label });
+      return false;
+    }
+    if (/上一个|上一项/.test(raw)) {
+      this.handleSwipe('up');
+      this.setData({ voiceHint: '已切换到：' + this.data.menuItems[this.data.selectedIndex].label });
+      return false;
+    }
+
+    // 都不命中：忽略并继续听，给轻提示而非报错卡死
+    this.setData({ voiceHint: '没听懂："' + raw + '"，请再说一次' });
+    return false;
   },
 
   toggleViewMode() {
@@ -311,6 +461,14 @@ export default {
         bindtap="enterSelected">
         <text class="menu-text">{{item.label}}</text>
       </view>
+    </view>
+
+    <view class="voice-panel">
+      <text class="voice-badge">🎙 语音：说"开始拍照"即可直接拍摄</text>
+      <text class="voice-mode-text {{listeningClass}}">{{asrModeText}}</text>
+    </view>
+    <view class="voice-hint-row" ink:if="{{voiceHint !== ''}}">
+      <text class="voice-hint-text">{{voiceHint}}</text>
     </view>
 
     <view class="view-toggle" ink:if="{{userCount > 0}}">
@@ -473,6 +631,44 @@ export default {
 
 .menu-item.selected .menu-text {
   color: #FFFFFF;
+}
+
+.voice-panel {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: rgba(64, 255, 94, 0.06);
+  border: var(--border-width-thin, 1px) solid var(--border-color-muted, rgba(64, 255, 94, 0.25));
+  border-radius: var(--radius-sm, 8px);
+}
+
+.voice-badge {
+  font-size: 12px;
+  color: var(--color-text-secondary, rgba(120, 255, 140, 0.85));
+}
+
+.voice-mode-text {
+  font-size: 11px;
+  font-weight: bold;
+  color: rgba(64, 255, 94, 0.6);
+}
+
+.voice-mode-text.active {
+  color: #40FF5E;
+  text-shadow: 0 0 6px rgba(64, 255, 94, 0.8);
+}
+
+.voice-hint-row {
+  display: flex;
+  justify-content: center;
+}
+
+.voice-hint-text {
+  font-size: 12px;
+  color: #FFC93C;
+  text-align: center;
 }
 
 .view-toggle {

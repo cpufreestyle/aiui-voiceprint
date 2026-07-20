@@ -5,7 +5,8 @@
     "pages/verify/verify",
     "pages/result/result",
     "pages/conversation/conversation",
-    "pages/media/media"
+    "pages/media/media",
+    "pages/genimg/genimg"
   ],
   "window": {
     "navigationBarTitleText": "听障助手",

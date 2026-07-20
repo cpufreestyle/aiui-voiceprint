@@ -11,8 +11,16 @@
           "enum": ["intro", "capturing", "describing", "result"],
           "description": "向导当前步骤"
         },
+        "pageMode": {
+          "type": "string",
+          "enum": ["general", "shape"],
+          "description": "页面语境模式：general=通用拍摄解说，shape=图形识别（语音直呼 mode=shape 进入）"
+        },
+        "pageTitleText": { "type": "string", "description": "顶部标题文案，随 pageMode 切换" },
         "caption": { "type": "string", "description": "主字幕文案" },
         "hint": { "type": "string", "description": "副提示文案" },
+        "shootBtnText": { "type": "string", "description": "拍照按钮主文案，随 pageMode 切换" },
+        "describeBtnText": { "type": "string", "description": "开始解说/识别按钮主文案，随 pageMode 切换" },
         "captureMode": { "type": "string", "enum": ["photo", "video"], "description": "当前采集模式：拍照/录像" },
         "captureModeText": { "type": "string", "description": "采集模式按钮文案" },
         "isRecording": { "type": "boolean", "description": "是否正在录像" },
@@ -37,7 +45,12 @@
               "previewSrc": { "type": "string", "description": "缩略图路径或 dataURL" },
               "sizeText": { "type": "string", "description": "体积文案" },
               "descText": { "type": "string", "description": "解说文字（未解说时为占位）" },
-              "descClass": { "type": "string", "description": "解说样式类：pending / live / demo" }
+              "descClass": { "type": "string", "description": "解说样式类：pending / live / demo" },
+              "descLines": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "结构化解说分行（图形识别模式下按【】分段拆行，便于分节渲染字幕）"
+              }
             }
           }
         }
@@ -57,17 +70,24 @@ import {
   startRecord, stopRecord, pathToBase64, getFileBytes
 } from '../../utils/camera.js';
 import {
-  describeImage, describeVideoFrames, isVisionConfigured, setVisionConfig, getVisionConfig
+  describeImage, describeShape, describeVideoFrames, isVisionConfigured, setVisionConfig, getVisionConfig
 } from '../../utils/vision.js';
 import {
   MIN_ITEMS, MAX_ITEMS, formatBytes, checkImageSize, checkVideoSize, canDescribe, isFull
 } from '../../utils/media-limits.js';
+import { initAsr, startAsr, stopAsr, isAsrAvailable } from '../../utils/asr.js';
 
 export default {
   data: {
     wizardStep: 'intro',
+    // pageMode：语音直呼「拍照识别图形」经 mode=shape 进入时切换为 shape，
+    // 叠加在通用拍摄解说流程之上，不改变原有拍照/录像/采集数量逻辑（见 onLoad）
+    pageMode: 'general',
+    pageTitleText: '拍摄解说',
     caption: '拍下眼前的画面，我来讲给你听',
     hint: '点一下开始拍摄，最少 3 张、最多 5 项（照片或视频）',
+    shootBtnText: '拍照',
+    describeBtnText: '开始解说',
     captureMode: 'photo',
     captureModeText: '切换到录像',
     isRecording: false,
@@ -89,16 +109,52 @@ export default {
     _describing: false
   },
 
-  onLoad() {
+  onLoad(query) {
     console.log('拍摄解说页面加载');
     this.data.items = [];
     this._nextId = 1;
     this._apiKeyDraft = '';
+    this._pendingAutoStart = false;
+
+    // 语音直呼模式解析：优先当前页面 query（mode=shape&autoStart=1，见 app.js _dispatch）；
+    // 部分固件 redirectTo 传参可能丢失，兜底读 getApp().globalData.launchIntent
+    // （app.js 冷/热启动分发时写入，见 docs/架构-语音直呼集成.md §2.3）
+    const q = query || {};
+    let mode = q.mode || '';
+    let autoStart = q.autoStart || '';
+    if (!mode) {
+      const app = getApp();
+      const intent = app && app.globalData && app.globalData.launchIntent;
+      if (intent && intent.route && intent.route.mode === 'shape') {
+        mode = 'shape';
+        // app.js 分发拼接 URL 时固定带 autoStart=1，兜底沿用同一约定
+        autoStart = '1';
+      }
+    }
+    const isShape = mode === 'shape';
+    this.data.pageMode = isShape ? 'shape' : 'general';
+
+    if (isShape) {
+      this.setData({
+        pageMode: 'shape',
+        pageTitleText: '图形识别',
+        caption: '对准要识别的图形，我来告诉你它的详细信息',
+        hint: '点一下开始拍摄，我会识别图形的类别、构成、比例与用途',
+        shootBtnText: '拍摄图形',
+        describeBtnText: '开始识别'
+      });
+    }
+
     this.refreshVisionBadge();
     this.refreshApiKeyMasked();
     // 相机上下文建议 onReady 后创建；此处先尝试一次，onReady 再兜底
     this.data.cameraCtx = acquireCameraContext();
     this.setData({ cameraReady: isCameraAvailable() });
+
+    if (isShape && autoStart === '1') {
+      // 语音直呼「拍照识别图形」：onReady 相机就绪后自动触发一次拍照流程
+      this._pendingAutoStart = true;
+    }
   },
 
   onReady() {
@@ -106,15 +162,38 @@ export default {
       this.data.cameraCtx = acquireCameraContext();
       this.setData({ cameraReady: isCameraAvailable() });
     }
+    if (this._pendingAutoStart) {
+      this._pendingAutoStart = false;
+      const that = this;
+      // 复用现有向导流转 + 拍照按钮同款 handler，不新写拍照逻辑：
+      // 先 startCapture() 切到 capturing 步骤（<camera> 组件才会挂载），
+      // 留一拍再调 onTakePhoto()（无相机时它会自动降级为演示采集，同现有逻辑）
+      this.startCapture();
+      setTimeout(function () { that.onTakePhoto(); }, 500);
+    }
+    // 图形识别模式：相机就绪后一并开启语音常听（ASR 用麦、拍照用摄像头，
+    // 二者可并存，见 setupShapeVoice 注释）
+    this.setupShapeVoice();
   },
 
-  onShow() { installKeyboardFallback(this); },
-  onHide() { removeKeyboardFallback(this); },
+  onShow() {
+    installKeyboardFallback(this);
+    // 从子流程/系统返回本页时（onReady 只在首次渲染触发一次），
+    // 若语音常听已被 onHide 关掉，这里补一次，setupShapeVoice 内部按 _voiceActive 去重。
+    this.setupShapeVoice();
+  },
+  onHide() {
+    removeKeyboardFallback(this);
+    this.teardownShapeVoice();
+  },
   onUnload() {
     // 录像中则收尾，避免占用相机
     if (this.data.isRecording && this.data.cameraCtx) {
       try { stopRecord(this.data.cameraCtx, {}); } catch (e) {}
     }
+    // 离场释放语音识别器：ASR 与拍照虽可并存，但离开本页后必须停掉，
+    // 否则会和下一个打开 ASR 的页面抢占同一个识别器单例
+    this.teardownShapeVoice();
     removeKeyboardFallback(this);
   },
 
@@ -144,14 +223,16 @@ export default {
   // ====== 向导流转 ======
 
   startCapture() {
+    const isShape = this.data.pageMode === 'shape';
+    const target = isShape ? '图形' : '画面';
     this.setData({
       wizardStep: 'capturing',
-      caption: this.data.captureMode === 'photo' ? '对准画面，拍一张' : '对准画面，开始录像',
+      caption: this.data.captureMode === 'photo' ? ('对准' + target + '，拍一张') : ('对准' + target + '，开始录像'),
       hint: this.data.cameraReady
-        ? '短按=拍照 ｜ 滑动=切换拍照/录像 ｜ 采够 3 项后双击=开始解说'
+        ? ('短按=拍摄' + target + ' ｜ 滑动=切换拍照/录像 ｜ 采够 3 项后双击=开始' + (isShape ? '识别' : '解说'))
         : '当前无相机（演示采集）：短按=添加一项演示媒体'
     });
-    speak(this.data.cameraReady ? '开始拍摄' : '当前没有相机，进入演示采集');
+    speak(this.data.cameraReady ? ('开始拍摄' + target) : '当前没有相机，进入演示采集');
   },
 
   // 采集上限拦截
@@ -299,7 +380,8 @@ export default {
       frames: raw.frames || [],
       sizeText: raw.sizeText || '',
       descText: '待解说',
-      descClass: 'pending'
+      descClass: 'pending',
+      descLines: []
     };
     const items = this.data.items.concat([item]);
     const count = items.length;
@@ -336,9 +418,11 @@ export default {
   // ====== 解说（逐项调用多模态模型 + 语音播报）======
   startDescribe() {
     if (this.data._describing) return;
+    const isShape = this.data.pageMode === 'shape';
+    const verb = isShape ? '识别' : '解说';
     if (!canDescribe(this.data.count)) {
-      this.setData({ hint: '至少采集 ' + MIN_ITEMS + ' 项才能解说' });
-      speak('至少采集三项才能解说');
+      this.setData({ hint: '至少采集 ' + MIN_ITEMS + ' 项才能' + verb });
+      speak('至少采集三项才能' + verb);
       return;
     }
     this.data._describing = true;
@@ -346,10 +430,12 @@ export default {
     const live = isVisionConfigured();
     this.setData({
       wizardStep: 'describing',
-      caption: '正在解说画面内容',
-      hint: live ? 'Agnes 视觉模型识别中，请稍候' : '演示模式（未配置视觉模型），展示演示解说'
+      caption: isShape ? '正在识别图形结构' : '正在解说画面内容',
+      hint: live
+        ? ('Agnes 视觉模型' + verb + '中，请稍候')
+        : ('演示模式（未配置视觉模型），展示' + (isShape ? '图形识别演示文案' : '演示解说'))
     });
-    speak(live ? '开始解说，正在识别画面' : '开始演示解说');
+    speak(live ? ('开始' + verb + '，正在识别画面') : ('开始演示' + verb));
     this.describeAt(0);
   },
 
@@ -364,9 +450,10 @@ export default {
     const item = items[idx];
     this.markItem(idx, '识别中…', 'pending');
 
+    const isShape = this.data.pageMode === 'shape';
     const p = item.kind === 'video'
       ? describeVideoFrames(item.frames)
-      : describeImage(item.base64);
+      : (isShape ? describeShape(item.base64) : describeImage(item.base64));
 
     p.then(function (res) {
       const cls = res.mode === 'live' ? 'live' : 'demo';
@@ -379,11 +466,16 @@ export default {
     });
   },
 
-  // 更新第 idx 项的解说文案与样式
+  // 更新第 idx 项的解说文案与样式；图形识别模式下若文本含【】结构标记，
+  // 按换行拆成 descLines 供模板分节渲染（更易读，非结构化文本时回退整段展示）
   markItem(idx, text, cls) {
+    const isShape = this.data.pageMode === 'shape';
+    const lines = (isShape && text && text.indexOf('【') >= 0)
+      ? text.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; })
+      : [];
     const items = this.data.items.map(function (it, i) {
       if (i !== idx) return it;
-      return Object.assign({}, it, { descText: text, descClass: cls });
+      return Object.assign({}, it, { descText: text, descClass: cls, descLines: lines });
     });
     this.setData({ items: items });
   },
@@ -391,17 +483,21 @@ export default {
   finishDescribe() {
     this.data._describing = false;
     const live = isVisionConfigured();
+    const isShape = this.data.pageMode === 'shape';
     this.setData({
       wizardStep: 'result',
-      caption: '解说完成',
-      hint: live ? '以上为 Agnes 识别结果 ｜ 双击退出 ｜ 短按返回主页' : '以上为演示解说 ｜ 填入 API Key 可获得真实识别 ｜ 双击退出'
+      caption: isShape ? '图形识别完成' : '解说完成',
+      hint: live
+        ? ('以上为 Agnes ' + (isShape ? '图形识别' : '识别') + '结果 ｜ 双击退出 ｜ 短按返回主页')
+        : ('以上为' + (isShape ? '图形识别演示' : '演示解说') + ' ｜ 填入 API Key 可获得真实识别 ｜ 双击退出')
     });
     this.vibrate();
-    speak('解说完成');
+    speak(isShape ? '图形识别完成' : '解说完成');
   },
 
   // 全部重来
   resetAll() {
+    const isShape = this.data.pageMode === 'shape';
     this.data.items = [];
     this._nextId = 1;
     this.data._describing = false;
@@ -415,8 +511,8 @@ export default {
       isRecording: false,
       recordBtnText: '开始录像',
       recordBtnClass: '',
-      caption: '重新开始采集',
-      hint: '短按拍照，滑动切换拍照/录像'
+      caption: isShape ? '重新开始识别' : '重新开始采集',
+      hint: isShape ? '短按拍摄图形，滑动切换拍照/录像' : '短按拍照，滑动切换拍照/录像'
     });
     speak('已清空，重新采集');
   },
@@ -472,6 +568,75 @@ export default {
     speak('相机不可用，切换为演示采集');
   },
 
+  // ====== 语音控制（仅 shape=图形识别模式常听，见 AGENTS.md 技能2）======
+  // ASR 用麦克风、拍照用摄像头，二者可在真机上并存；但离场（onHide/onUnload）
+  // 必须释放识别器，避免占着麦克风、也避免和下一页面的 ASR 抢单例。
+  // general 模式（拍摄解说通用流程）不强制常听，autoStart 系统语音路径不受影响。
+  setupShapeVoice() {
+    if (this.data.pageMode !== 'shape') return;
+    if (this._voiceActive) return; // 已在监听中，避免 onReady/onShow 重复触发 double start
+    if (!isAsrAvailable()) return; // 无 ASR 能力：诚实保持原有 autoStart/手势路径，不额外报错
+    const that = this;
+    this._voiceActive = true;
+    initAsr({
+      onFinal: function (text) { that.onShapeVoiceCommand(text); }
+    });
+    startAsr({ lang: 'zh_CN' });
+  },
+
+  // 真机识别器 onStop 后需重新 start 才能继续听下一句，隔一拍再 start 避免同步重入
+  scheduleShapeRestart() {
+    const that = this;
+    if (this._shapeVoiceRestartTimer) return;
+    this._shapeVoiceRestartTimer = setTimeout(function () {
+      that._shapeVoiceRestartTimer = null;
+      if (!that._voiceActive || !isAsrAvailable()) return;
+      startAsr({ lang: 'zh_CN' });
+    }, 400);
+  },
+
+  teardownShapeVoice() {
+    this._voiceActive = false;
+    if (this._shapeVoiceRestartTimer) {
+      try { clearTimeout(this._shapeVoiceRestartTimer); } catch (e) {}
+      this._shapeVoiceRestartTimer = null;
+    }
+    stopAsr();
+  },
+
+  // 语音指令分类：拍照/识别/返回三类，全部复用现有 handler，不新写拍摄或解说逻辑
+  onShapeVoiceCommand(text) {
+    const raw = (text || '').trim();
+    if (!raw) { this.scheduleShapeRestart(); return; }
+
+    if (/拍/.test(raw)) {
+      // 复用 handleTap 同款的步骤流转：intro 时先进入拍摄，capturing 时才真正拍照
+      if (this.data.wizardStep === 'intro') this.startCapture();
+      if (this.data.wizardStep === 'capturing') this.onTakePhoto();
+      this.scheduleShapeRestart();
+      return;
+    }
+    if (/识别|分析|解说|讲讲/.test(raw)) {
+      if (this.data.count >= 1) {
+        // startDescribe() 内部已对「不足 MIN_ITEMS」做校验 + 语音提示，这里只做基本门槛
+        this.startDescribe();
+      } else {
+        this.setData({ hint: '还没有采集任何画面，请先拍照' });
+        speak('还没有采集任何画面，请先拍照');
+      }
+      this.scheduleShapeRestart();
+      return;
+    }
+    if (/返回|退出/.test(raw)) {
+      this.teardownShapeVoice();
+      safeBack();
+      return;
+    }
+
+    // 未命中：继续听下一句，不报错卡死
+    this.scheduleShapeRestart();
+  },
+
   // ====== 导航与手势 ======
   goBackHome() { safeBack(); },
 
@@ -523,7 +688,7 @@ export default {
       <view class="back-btn" bindtap="goBackHome">
         <text class="back-btn-text">← 返回主页</text>
       </view>
-      <text class="title">拍摄解说</text>
+      <text class="title">{{pageTitleText}}</text>
       <view class="mode-badge {{visionBadgeClass}}" bindtap="toggleVisionSetting">
         <text>{{visionModeText}}</text>
       </view>
@@ -560,7 +725,7 @@ export default {
     <!-- 采集操作区 -->
     <view class="capture-ops" wx:if="{{wizardStep === 'capturing'}}">
       <button class="op-btn shoot" bindtap="onTakePhoto" wx:if="{{captureMode === 'photo'}}">
-        <text class="op-main">拍照</text>
+        <text class="op-main">{{shootBtnText}}</text>
         <text class="op-sub">采集一张图片（≤5MB）</text>
       </button>
       <button class="op-btn record {{recordBtnClass}}" bindtap="onToggleRecord" wx:if="{{captureMode === 'video'}}">
@@ -571,7 +736,7 @@ export default {
         <text class="op-main">{{captureModeText}}</text>
       </button>
       <button class="op-btn describe" bindtap="startDescribe" disabled="{{!canDescribe}}">
-        <text class="op-main">开始解说</text>
+        <text class="op-main">{{describeBtnText}}</text>
         <text class="op-sub">对已采集的 {{count}} 项逐一识别播报</text>
       </button>
       <button class="op-btn undo" bindtap="removeLast" disabled="{{count === 0}}">
@@ -593,7 +758,11 @@ export default {
           <text class="item-size">{{item.sizeText}}</text>
         </view>
         <image class="item-thumb" src="{{item.previewSrc}}" mode="aspectFill" wx:if="{{item.previewSrc}}"></image>
-        <text class="item-desc {{item.descClass}}">{{item.descText}}</text>
+        <!-- 图形识别模式下若解说文本含【】结构标记，按行分节渲染，可读性优于整段 -->
+        <view class="item-desc-block" wx:if="{{item.descLines.length > 0}}">
+          <text class="item-desc-line {{item.descClass}}" wx:for="{{item.descLines}}" wx:for-item="ln" wx:key="index">{{ln}}</text>
+        </view>
+        <text class="item-desc {{item.descClass}}" wx:if="{{item.descLines.length === 0}}">{{item.descText}}</text>
       </view>
     </scroll-view>
 
@@ -799,6 +968,13 @@ export default {
 .item-desc.pending { color: #888888; }
 .item-desc.live { color: #FFFFFF; text-shadow: 0 0 4px rgba(64, 255, 94, 0.3); }
 .item-desc.demo { color: #FFC93C; }
+
+/* 图形识别结构化分行渲染（【类别】【形状构成】…按行分节，可读性优于整段） */
+.item-desc-block { display: flex; flex-direction: column; gap: 4px; }
+.item-desc-line { font-size: 18px; line-height: 1.5; color: #FFFFFF; }
+.item-desc-line.pending { color: #888888; }
+.item-desc-line.live { color: #FFFFFF; text-shadow: 0 0 4px rgba(64, 255, 94, 0.3); }
+.item-desc-line.demo { color: #FFC93C; }
 
 .empty-tip { padding: 20px; text-align: center; }
 .empty-text { font-size: 15px; color: #999999; line-height: 1.5; }

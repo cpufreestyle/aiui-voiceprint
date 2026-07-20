@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>听障助手 × Hi Rokid 语音直呼集成架构</title>
+<style>
+/* ========== 设计令牌：黑金多宝阁 · 博古架拓扑 ========== */
+:root{
+  --bg-void:#0a0a0d; --bg-panel:#14131a; --bg-panel-2:#1c1a24; --bg-elevated:#242029;
+  --gold-primary:#d4af37; --gold-bright:#f4d98b; --gold-amber:#c9a227; --gold-deep:#a88422;
+  --gold-line:rgba(212,175,55,.35); --border-gold:rgba(212,175,55,.22);
+  --text-primary:#ede8dc; --text-muted:#9a927f; --text-dim:#6b6555;
+  --danger:#c0563a; --ok:#8fae6b;
+  --font-serif:"Noto Serif SC","Songti SC","STSong",serif;
+  --font-mono:"Space Mono","JetBrains Mono","Consolas",monospace;
+  --font-sans:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;
+  --radius:4px;
+  --glow-gold:0 0 20px rgba(212,175,55,.12);
+  --glow-gold-strong:0 0 28px rgba(212,175,55,.22);
+  --shadow-panel:0 8px 32px rgba(0,0,0,.5);
+  --ease:cubic-bezier(.22,.68,.35,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(212,175,55,.06), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 20%, rgba(212,175,55,.04), transparent 60%),
+    var(--bg-void);
+  color:var(--text-primary);
+  font-family:var(--font-sans);
+  line-height:1.8;
+  overflow-x:hidden;
+  min-width:320px;
+}
+a{color:var(--gold-primary);text-decoration:none;}
+.container{max-width:1200px;margin:0 auto;padding:0 32px;}
+img,svg{max-width:100%;}
+
+/* ---------- 顶部悬浮导航 ---------- */
+.topnav{
+  position:sticky;top:0;z-index:50;
+  background:rgba(10,10,13,.86);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border-gold);
+}
+.topnav-inner{
+  max-width:1200px;margin:0 auto;padding:0 32px;height:52px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+}
+.topnav-logo{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--gold-primary);white-space:nowrap;}
+.topnav-links{display:flex;gap:20px;flex-wrap:wrap;padding:8px 0;}
+.topnav-links a{font-size:12px;color:var(--text-muted);letter-spacing:.03em;white-space:nowrap;transition:color .3s var(--ease);}
+.topnav-links a:hover{color:var(--gold-bright);}
+
+/* ---------- 封面 ---------- */
+.cover{
+  min-height:78vh;display:flex;flex-direction:column;justify-content:center;
+  padding:80px 32px 60px;max-width:1200px;margin:0 auto;position:relative;
+}
+.kicker{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--text-muted);margin-bottom:22px;
+}
+.kicker::before{content:"◆ ";color:var(--gold-primary);}
+.cover h1{
+  font-family:var(--font-serif);font-weight:600;
+  font-size:clamp(28px,4.4vw,44px);line-height:1.35;
+  background:linear-gradient(135deg,#f4d98b,#d4af37,#a88422);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  margin-bottom:14px;
+}
+.cover .subtitle-en{
+  font-family:var(--font-mono);font-size:13px;letter-spacing:.08em;color:var(--text-dim);
+  margin-bottom:36px;
+}
+.meta-row{
+  display:flex;gap:28px;flex-wrap:wrap;font-family:var(--font-mono);font-size:12px;
+  color:var(--text-muted);margin-bottom:44px;padding-bottom:36px;border-bottom:1px solid var(--border-gold);
+}
+.meta-row b{color:var(--gold-primary);font-weight:400;}
+.epigraph{
+  border-left:2px solid var(--gold-line);padding-left:24px;max-width:760px;
+}
+.epigraph p{font-family:var(--font-serif);font-size:19px;line-height:1.9;color:var(--text-primary);}
+.epigraph p em{color:var(--gold-bright);font-style:normal;}
+.epigraph cite{display:block;margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);font-style:normal;}
+
+/* ---------- 通用 section ---------- */
+.section{padding:88px 0;border-top:1px solid var(--border-gold);}
+.section:first-of-type{border-top:none;}
+.section-head{margin-bottom:48px;}
+.section-num{font-family:var(--font-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;}
+.section-num::before{content:"◆ ";color:var(--gold-primary);}
+.section-head h2{
+  font-family:var(--font-serif);font-weight:600;font-size:clamp(22px,3vw,32px);
+  background:linear-gradient(135deg,#f4d98b,#d4af37,#a88422);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.section-lead{margin-top:14px;color:var(--text-muted);font-size:15px;max-width:760px;}
+
+/* ---------- 核心真相面板 ---------- */
+.truth-panel{
+  background:var(--bg-panel);border:1px solid var(--border-gold);border-radius:var(--radius);
+  padding:44px;box-shadow:var(--shadow-panel);position:relative;
+}
+.truth-panel::before{
+  content:"";position:absolute;inset:0;border-radius:var(--radius);pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(212,175,55,.08);
+}
+.truth-panel .truth-label{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--danger);margin-bottom:18px;
+}
+.truth-panel .truth-label::before{content:"⚠ 核心真相 · ";color:var(--danger);}
+.truth-panel h3{
+  font-family:var(--font-serif);font-size:clamp(20px,2.6vw,28px);line-height:1.7;font-weight:600;
+  color:var(--text-primary);margin-bottom:20px;
+}
+.truth-panel h3 strong{
+  background:linear-gradient(135deg,#f4d98b,#d4af37);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.truth-panel p{color:var(--text-muted);font-size:15px;max-width:900px;}
+.truth-layers{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px;
+}
+.truth-layer{
+  border:1px solid var(--border-gold);border-radius:var(--radius);padding:20px;
+  background:var(--bg-panel-2);transition:all .4s var(--ease);
+}
+.truth-layer:hover{transform:translateY(-3px);box-shadow:var(--glow-gold);}
+.truth-layer .tl-num{font-family:var(--font-mono);color:var(--gold-primary);font-size:12px;margin-bottom:8px;}
+.truth-layer h4{font-family:var(--font-serif);font-size:16px;color:var(--text-primary);margin-bottom:8px;font-weight:600;}
+.truth-layer p{font-size:13px;color:var(--text-muted);}
+
+/* ---------- 表格 ---------- */
+.table-wrap{overflow-x:auto;border:1px solid var(--border-gold);border-radius:var(--radius);}
+table.blackgold{width:100%;border-collapse:collapse;min-width:640px;}
+table.blackgold thead th{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--gold-primary);text-align:left;padding:14px 18px;background:var(--bg-elevated);
+  border-bottom:1px solid var(--border-gold);white-space:nowrap;
+}
+table.blackgold tbody td{
+  padding:16px 18px;font-size:13.5px;color:var(--text-primary);vertical-align:top;
+  border-bottom:1px solid rgba(212,175,55,.12);
+}
+table.blackgold tbody tr:last-child td{border-bottom:none;}
+table.blackgold tbody tr{transition:background .3s var(--ease);}
+table.blackgold tbody tr:hover{background:var(--bg-elevated);}
+table.blackgold td.mono,table.blackgold td .mono-cell{font-family:var(--font-mono);color:var(--gold-primary);}
+.gap-text{color:var(--danger);font-weight:600;}
+.ok-text{color:var(--ok);}
+.badge{
+  display:inline-block;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
+  padding:2px 8px;border-radius:2px;white-space:nowrap;border:1px solid transparent;
+}
+.badge-new{color:var(--gold-amber);border-color:rgba(201,162,39,.4);background:rgba(201,162,39,.08);}
+.badge-mod{color:var(--gold-bright);border-color:rgba(244,217,139,.35);background:rgba(244,217,139,.06);}
+.badge-ext{color:var(--danger);border-color:rgba(192,86,58,.4);background:rgba(192,86,58,.08);}
+.badge-exist{color:var(--text-muted);border-color:var(--border-gold);background:rgba(255,255,255,.02);}
+
+/* ---------- 拓扑图 ---------- */
+.topo-legend{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:24px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);}
+.legend-item{display:inline-flex;align-items:center;gap:7px;}
+.legend-swatch{width:13px;height:13px;border-radius:2px;display:inline-block;flex-shrink:0;}
+.sw-fixed{border:1.5px solid var(--text-dim);background:transparent;}
+.sw-exist{border:1.5px solid var(--gold-primary);background:rgba(212,175,55,.05);}
+.sw-mod{border:1.5px solid var(--gold-bright);background:rgba(244,217,139,.06);}
+.sw-new{border:1.5px dashed var(--gold-amber);background:rgba(201,162,39,.06);}
+.sw-ext{border:1.5px dashed var(--danger);background:rgba(192,86,58,.06);}
+.topo-wrap{overflow-x:auto;padding:8px 0 16px;}
+.topo-wrap svg{display:block;min-width:1100px;width:100%;height:auto;}
+.node-rect{stroke-width:1.4;}
+.n-fixed .node-rect{fill:rgba(255,255,255,.02);stroke:var(--text-dim);}
+.n-exist .node-rect{fill:rgba(212,175,55,.05);stroke:var(--gold-primary);}
+.n-mod .node-rect{fill:rgba(244,217,139,.06);stroke:var(--gold-bright);stroke-width:1.8;}
+.n-new .node-rect{fill:rgba(201,162,39,.06);stroke:var(--gold-amber);stroke-dasharray:4 3;}
+.n-ext .node-rect{fill:rgba(192,86,58,.06);stroke:var(--danger);stroke-dasharray:4 3;}
+.node-title{font-family:var(--font-sans);font-size:12.5px;fill:var(--text-primary);}
+.node-sub{font-family:var(--font-mono);font-size:9.5px;fill:var(--text-muted);}
+.edge{fill:none;stroke:var(--gold-primary);stroke-width:1.3;opacity:.55;}
+.edge-dashed{fill:none;stroke:var(--gold-deep);stroke-width:1.1;opacity:.5;stroke-dasharray:3 3;}
+.elabel rect{fill:var(--bg-void);opacity:.88;}
+.elabel text{font-family:var(--font-mono);font-size:9.5px;fill:var(--text-muted);}
+.row-label{font-family:var(--font-mono);font-size:10px;fill:var(--gold-deep);letter-spacing:.08em;}
+
+/* ---------- 多宝阁 curio grid ---------- */
+.curio-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:22px;}
+.curio{
+  border:1px solid var(--border-gold);border-radius:var(--radius);padding:32px;
+  background:var(--bg-panel);position:relative;transition:all .4s var(--ease);
+}
+.curio:hover{transform:translateY(-3px);box-shadow:var(--glow-gold);border-color:var(--gold-line);}
+.curio-a{grid-column:span 5;}
+.curio-b{grid-column:span 7;}
+.curio-c{grid-column:span 12;}
+.curio-num{
+  font-family:var(--font-serif);font-size:13px;color:var(--gold-primary);
+  border:1px solid var(--border-gold);border-radius:2px;padding:3px 10px;display:inline-block;margin-bottom:16px;
+}
+.curio h3{font-family:var(--font-serif);font-size:19px;color:var(--text-primary);margin-bottom:6px;font-weight:600;}
+.curio .curio-desc{font-size:13px;color:var(--text-muted);margin-bottom:22px;max-width:640px;}
+.mini-topo{overflow-x:auto;margin-bottom:22px;}
+.mini-topo svg{display:block;min-width:560px;width:100%;height:auto;}
+.curio ul.points{list-style:none;}
+.curio ul.points li{
+  position:relative;padding-left:20px;margin-bottom:12px;font-size:13.5px;color:var(--text-muted);line-height:1.85;
+}
+.curio ul.points li::before{content:"—";position:absolute;left:0;color:var(--gold-primary);}
+.curio ul.points li strong{color:var(--text-primary);font-weight:600;}
+.code-block{
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.9;color:var(--gold-bright);
+  background:var(--bg-void);border:1px solid var(--border-gold);border-radius:2px;
+  padding:16px 18px;overflow-x:auto;margin-top:16px;white-space:pre;
+}
+.code-block .cm{color:var(--text-dim);}
+.mode-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;}
+.two-col{display:grid;grid-template-columns:1.1fr .9fr;gap:32px;margin-top:22px;}
+.mini-table{width:100%;border-collapse:collapse;font-size:12px;}
+.mini-table th{font-family:var(--font-mono);font-size:10px;color:var(--gold-primary);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border-gold);text-transform:uppercase;letter-spacing:.06em;}
+.mini-table td{padding:8px 10px;color:var(--text-muted);border-bottom:1px solid rgba(212,175,55,.1);font-family:var(--font-mono);font-size:11px;}
+.mini-table td.desc{font-family:var(--font-sans);color:var(--text-primary);font-size:12px;}
+.inline-note{
+  margin-top:18px;border-left:3px solid var(--danger);background:rgba(192,86,58,.07);
+  padding:14px 18px;font-size:12.5px;color:var(--text-muted);border-radius:0 2px 2px 0;
+}
+.inline-note b{color:var(--danger);}
+
+/* ---------- gap-card 未决项 ---------- */
+.gap-list{display:flex;flex-direction:column;gap:16px;}
+.gap-card{
+  border-left:3px solid var(--danger);background:rgba(192,86,58,.06);border-radius:0 var(--radius) var(--radius) 0;
+  padding:20px 26px;display:flex;gap:20px;align-items:flex-start;transition:all .3s var(--ease);
+}
+.gap-card:hover{background:rgba(192,86,58,.1);}
+.gap-num{font-family:var(--font-mono);font-size:20px;color:var(--danger);flex-shrink:0;min-width:34px;}
+.gap-body h4{font-family:var(--font-serif);font-size:15.5px;color:var(--text-primary);margin-bottom:8px;font-weight:600;}
+.gap-body p{font-size:13px;color:var(--text-muted);}
+.gap-body .verify{margin-top:10px;font-family:var(--font-mono);font-size:11px;color:var(--gold-amber);}
+.gap-body .verify b{color:var(--gold-primary);}
+
+/* ---------- 依赖序条 ---------- */
+.deps-note{
+  margin-top:24px;font-family:var(--font-mono);font-size:12px;color:var(--text-muted);
+  border:1px dashed var(--border-gold);border-radius:2px;padding:16px 20px;line-height:2;
+}
+.deps-note b{color:var(--gold-primary);}
+
+/* ---------- footer ---------- */
+footer{padding:60px 0 90px;border-top:1px solid var(--border-gold);}
+footer .foot-quote{font-family:var(--font-serif);font-size:16px;color:var(--text-muted);max-width:700px;margin-bottom:24px;line-height:1.9;}
+footer .foot-meta{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);}
+footer .foot-meta a{color:var(--text-dim);}
+
+/* ---------- reveal 动画 ---------- */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .7s var(--ease),transform .7s var(--ease);}
+.reveal.in-view{opacity:1;transform:translateY(0);}
+
+/* ---------- 响应式 ---------- */
+@media (max-width:768px){
+  .container{padding:0 18px;}
+  .cover{padding:56px 18px 40px;}
+  .topnav-inner{padding:0 18px;}
+  .section{padding:56px 0;}
+  .truth-panel{padding:26px;}
+  .truth-layers{grid-template-columns:1fr;}
+  .curio{padding:22px;}
+  .curio-a,.curio-b,.curio-c{grid-column:1/-1;}
+  .two-col{grid-template-columns:1fr;gap:20px;}
+  .curio-grid{gap:16px;}
+  .meta-row{gap:14px;}
+}
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="topnav-logo">听障助手 × HI ROKID</span>
+    <div class="topnav-links">
+      <a href="#truth">核心真相</a>
+      <a href="#arch">总架构</a>
+      <a href="#chains">能力链</a>
+      <a href="#checklist">改造清单</a>
+      <a href="#degrade">降级表</a>
+      <a href="#risks">未决项</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ========== 封面 ========== -->
+<header class="cover">
+  <div class="kicker">Rokid Glasses · Hearing Assist Agent · Voice Dispatch Architecture</div>
+  <h1>听障助手 × Hi Rokid<br>语音直呼集成方案</h1>
+  <div class="subtitle-en">Hi Rokid Wake Word · AIUI OS Semantic Routing · onLaunch Parameter Dispatch — Three Layers, One Equivalent Experience</div>
+  <div class="meta-row">
+    <span><b>项目</b> aiui-voiceprint</span>
+    <span><b>来源文档</b> docs/架构-语音直呼集成.md</span>
+    <span><b>可视化生成日期</b> 2026-07-19</span>
+    <span><b>范围</b> 热唤醒路由 · 图形识别 · 拍照生成发手机</span>
+  </div>
+  <div class="epigraph">
+    <p>「Hi Rokid」唤醒系统 → 用户在同一句/下一句里说出含「听障助手」的指令 → AIUI OS 按 <em>AGENTS.md</em> 的技能描述做<em>语义匹配</em>唤起本 Agent。<br>路由质量 = AGENTS.md 写得好不好 + 应用内兜底解析强不强，<em>不依赖 OS 精确传参</em>。</p>
+    <cite>—— docs/架构-语音直呼集成.md · §2.1</cite>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ========== 核心真相 ========== -->
+  <section class="section reveal" id="truth">
+    <div class="section-head">
+      <div class="section-num">Ground Truth · 壹</div>
+      <h2>核心真相：Rokid 不开放自定义热词</h2>
+      <p class="section-lead">「听障助手」不能被注册成独立热词直接唤醒。系统唤醒词固定为「Hi Rokid」（或长按触控板），第三方无法注册热词——这是本方案一切设计的前提，不是待优化项，是平台硬边界。</p>
+    </div>
+    <div class="truth-panel">
+      <div class="truth-label">Platform Constraint</div>
+      <h3>本方案的「热唤醒」= <strong>系统唤醒词</strong> + <strong>语义意图路由</strong> + <strong>应用内参数分发</strong>，三层拼出来的<strong>等效体验</strong>，不是真正意义上的自定义热词。</h3>
+      <p>app.json 也没有 intent/skill 字段可供声明语音意图——只有 pages / window / permissions。因此意图声明全部落在 AGENTS.md（OS/LLM 路由依据），运行时参数走 onLaunch(options) / onShow(options)。两头都要做，且应用内必须能从原始 query 文本自行解析，因为 OS 能否把「模式」作为结构化参数传进来本身是未决项（见 §未决项 1）。</p>
+      <div class="truth-layers">
+        <div class="truth-layer"><div class="tl-num">LAYER 01 · 系统侧不可改</div><h4>Hi Rokid 唤醒词</h4><p>固定唤醒词，第三方无法注册热词，也无法自定义触发短语。</p></div>
+        <div class="truth-layer"><div class="tl-num">LAYER 02 · 应用可控</div><h4>AGENTS.md 语义路由</h4><p>AIUI OS 依据 AGENTS.md 的技能描述做语义匹配，触发说法即 few-shot 例句，需穷举口语变体。</p></div>
+        <div class="truth-layer"><div class="tl-num">LAYER 03 · 应用可控</div><h4>onLaunch 参数分发</h4><p>options 多字段名容错解析 + intent-router 从原始文本兜底解析模式，不依赖 OS 精确传参。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 2.1 想要的/现实/等效实现 ========== -->
+  <section class="section reveal">
+    <div class="section-head">
+      <div class="section-num">Reality Check · 贰</div>
+      <h2>想要的 vs 平台现实 vs 等效实现</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="blackgold">
+        <thead><tr><th>想要的</th><th>平台现实</th><th>本方案的等效实现</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>自定义热词「听障助手」直接唤醒</td>
+            <td><span class="gap-text">做不到。</span>唤醒词固定为「Hi Rokid」（或长按触控板），第三方无法注册热词</td>
+            <td>「Hi Rokid」唤醒系统 → 用户在同一句/下一句里说出含「听障助手」的指令 → AIUI OS 按 AGENTS.md 的技能描述做语义匹配唤起本 Agent</td>
+          </tr>
+          <tr>
+            <td>app.json 声明 voice intent</td>
+            <td><span class="gap-text">app.json 只有</span> pages + window + permissions，无 intent/skill 字段</td>
+            <td>意图声明全部落在 <b class="mono-cell">AGENTS.md</b>（OS/LLM 路由依据）；运行时参数走 onLaunch(options) / onShow(options)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ========== 总架构图 ========== -->
+  <section class="section reveal" id="arch">
+    <div class="section-head">
+      <div class="section-num">Overall Architecture · 叁</div>
+      <h2>总架构：语音层 → Agent 层 → 外部服务 → 输出层</h2>
+      <p class="section-lead">四层纵览。虚线金边 = 本仓库新增文件；虚线暗红边 = 需新建的外部组件/依赖（不在眼镜端代码范围内）；实金边 = 修改的既有文件；细灰实线 = 系统侧固定、不可改。</p>
+    </div>
+
+    <div class="topo-legend">
+      <span class="legend-item"><span class="legend-swatch sw-fixed"></span>系统固定 · 不可改</span>
+      <span class="legend-item"><span class="legend-swatch sw-exist"></span>既有 / 已接</span>
+      <span class="legend-item"><span class="legend-swatch sw-mod"></span>修改（重写/改造）</span>
+      <span class="legend-item"><span class="legend-swatch sw-new"></span>新增文件（仓库内）</span>
+      <span class="legend-item"><span class="legend-swatch sw-ext"></span>新增外部组件 / 依赖（仓库外）</span>
+    </div>
+
+    <div class="topo-wrap">
+      <svg viewBox="-170 0 1440 760" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--gold-primary)"></path>
+          </marker>
+        </defs>
+
+        <!-- 行标签 -->
+        <text class="row-label" x="-160" y="66">语音层</text>
+        <text class="row-label" x="-160" y="176">分发层</text>
+        <text class="row-label" x="-160" y="276">路由层</text>
+        <text class="row-label" x="-160" y="382">技能分支</text>
+        <text class="row-label" x="-160" y="493">服务适配层</text>
+        <text class="row-label" x="-160" y="603">外部服务</text>
+        <text class="row-label" x="-160" y="713">输出层</text>
+
+        <!-- 连线（先画线，节点盖在上面） -->
+        <path class="edge" marker-end="url(#arrow)" d="M210,62 C224,62 226,62 240,62"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M430,62 C444,62 446,62 460,62"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M760,62 C740,62 710,62 690,62"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,84 C575,117 575,117 575,150"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,194 C575,222 575,222 575,250"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,294 C575,322 260,322 135,350"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,294 C575,322 575,322 575,350"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,294 C575,322 900,322 1025,350"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M135,408 C135,540 190,600 240,680"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,408 C575,434 575,434 575,460"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M575,518 C570,545 565,545 560,570"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M560,628 C500,655 340,660 240,680"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M1025,408 C1000,434 925,440 895,460"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M1025,408 C1050,434 1110,440 1135,460"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M895,518 C888,545 883,545 880,570"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M1000,489 C1008,489 1012,489 1020,489"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M1135,518 C1135,545 1135,545 1135,570"></path>
+        <path class="edge" marker-end="url(#arrow)" d="M1135,628 C1090,655 970,660 900,680"></path>
+
+        <!-- 边标签 -->
+        <g class="elabel" transform="translate(725,45)"><rect x="-38" y="-9" width="76" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">技能匹配依据</text></g>
+        <g class="elabel" transform="translate(575,117)"><rect x="-48" y="-9" width="96" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">query 文本+参数</text></g>
+        <g class="elabel" transform="translate(340,325)"><rect x="-42" y="-9" width="84" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">mode=caption</text></g>
+        <g class="elabel" transform="translate(575,325)"><rect x="-36" y="-9" width="72" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">mode=shape</text></g>
+        <g class="elabel" transform="translate(830,325)"><rect x="-38" y="-9" width="76" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">mode=genimg</text></g>
+        <g class="elabel" transform="translate(150,540)"><rect x="-42" y="-9" width="84" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">声纹标注+转写</text></g>
+        <g class="elabel" transform="translate(575,545)"><rect x="-32" y="-9" width="64" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">wx.request</text></g>
+        <g class="elabel" transform="translate(420,655)"><rect x="-30" y="-9" width="60" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">识别结果</text></g>
+        <g class="elabel" transform="translate(960,433)"><rect x="-30" y="-9" width="60" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">takePhoto</text></g>
+        <g class="elabel" transform="translate(895,545)"><rect x="-38" y="-9" width="76" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">POST 图生图</text></g>
+        <g class="elabel" transform="translate(1010,478)"><rect x="-28" y="-9" width="56" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">imageUrl</text></g>
+        <g class="elabel" transform="translate(1135,545)"><rect x="-34" y="-9" width="68" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">POST /push</text></g>
+        <g class="elabel" transform="translate(1015,655)"><rect x="-44" y="-9" width="88" height="15" rx="2"></rect><text text-anchor="middle" y="2.5">GET /pull · 扫码</text></g>
+
+        <!-- 节点：语音层（系统侧，不可改） -->
+        <g class="node n-fixed" transform="translate(20,40)"><rect class="node-rect" width="190" height="44" rx="4"></rect><text class="node-title" x="12" y="27">用户语音指令</text></g>
+        <g class="node n-fixed" transform="translate(240,40)"><rect class="node-rect" width="190" height="44" rx="4"></rect><text class="node-title" x="12" y="18">系统唤醒词 Hi Rokid</text><text class="node-sub" x="12" y="34">（固定，不可自定义热词）</text></g>
+        <g class="node n-fixed" transform="translate(460,40)"><rect class="node-rect" width="230" height="44" rx="4"></rect><text class="node-title" x="12" y="18">AIUI OS 语义意图路由</text><text class="node-sub" x="12" y="34">依据技能描述匹配 Agent</text></g>
+        <g class="node n-mod" transform="translate(760,40)"><rect class="node-rect" width="230" height="44" rx="4"></rect><text class="node-title" x="12" y="18">AGENTS.md 技能声明</text><text class="node-sub" x="12" y="34">重写：中文身份+三技能触发说法</text></g>
+
+        <!-- Agent 分发层 -->
+        <g class="node n-mod" transform="translate(460,150)"><rect class="node-rect" width="230" height="44" rx="4"></rect><text class="node-title" x="12" y="18">app.js</text><text class="node-sub" x="12" y="34">onLaunch/onShow(options) 修改</text></g>
+
+        <!-- 路由层 -->
+        <g class="node n-new" transform="translate(430,250)"><rect class="node-rect" width="290" height="44" rx="4"></rect><text class="node-title" x="12" y="18">utils/intent-router.js（新增）</text><text class="node-sub" x="12" y="34">正则秒判 → session.prompt() 兜底</text></g>
+
+        <!-- 三技能分支 -->
+        <g class="node n-exist" transform="translate(20,350)"><rect class="node-rect" width="230" height="58" rx="4"></rect><text class="node-title" x="12" y="20">pages/conversation（已有）</text><text class="node-sub" x="12" y="36">mode=caption 实时字幕+声纹标注</text></g>
+        <g class="node n-mod" transform="translate(460,350)"><rect class="node-rect" width="230" height="58" rx="4"></rect><text class="node-title" x="12" y="20">pages/media（修改）</text><text class="node-sub" x="12" y="36">mode=shape 拍照→图形识别</text></g>
+        <g class="node n-new" transform="translate(900,350)"><rect class="node-rect" width="250" height="58" rx="4"></rect><text class="node-title" x="12" y="20">pages/genimg（新增）</text><text class="node-sub" x="12" y="36">mode=genimg 拍照→生成→发手机</text></g>
+
+        <!-- 服务适配层 -->
+        <g class="node n-mod" transform="translate(460,460)"><rect class="node-rect" width="230" height="58" rx="4"></rect><text class="node-title" x="12" y="20">utils/vision.js（修改）</text><text class="node-sub" x="12" y="36">describeShape 定制 prompt</text></g>
+        <g class="node n-new" transform="translate(790,460)"><rect class="node-rect" width="210" height="58" rx="4"></rect><text class="node-title" x="12" y="20">imagegen.js（新增）</text><text class="node-sub" x="12" y="36">generateSimilar 探测+降级</text></g>
+        <g class="node n-new" transform="translate(1020,460)"><rect class="node-rect" width="230" height="58" rx="4"></rect><text class="node-title" x="12" y="20">phone-bridge.js（新增）</text><text class="node-sub" x="12" y="36">makeCode / pushResult / qrDataUrl</text></g>
+
+        <!-- 外部服务层 -->
+        <g class="node n-exist" transform="translate(430,570)"><rect class="node-rect" width="260" height="58" rx="4"></rect><text class="node-title" x="12" y="20">Agnes AI 多模态网关（已接）</text><text class="node-sub" x="12" y="36">apihub.agnes-ai.com/v1</text></g>
+        <g class="node n-ext" transform="translate(760,570)"><rect class="node-rect" width="240" height="58" rx="4"></rect><text class="node-title" x="12" y="20">图像生成 API（新增外部依赖）</text><text class="node-sub" x="12" y="36">供应商未定，见未决项 5</text></g>
+        <g class="node n-ext" transform="translate(1010,570)"><rect class="node-rect" width="250" height="58" rx="4"></rect><text class="node-title" x="12" y="20">云端 relay（必须新建）</text><text class="node-sub" x="12" y="36">POST /push · GET /pull · /r/{code}</text></g>
+
+        <!-- 输出层 -->
+        <g class="node n-exist" transform="translate(100,680)"><rect class="node-rect" width="280" height="58" rx="4"></rect><text class="node-title" x="12" y="20">TTS 播报 + 大字幕</text><text class="node-sub" x="12" y="36">既有渲染，caption/shape 两用例共用</text></g>
+        <g class="node n-ext" transform="translate(760,680)"><rect class="node-rect" width="280" height="58" rx="4"></rect><text class="node-title" x="12" y="20">手机侧 H5 结果页（新增）</text><text class="node-sub" x="12" y="36">GET /r/{code} 扫码/取件码拉取</text></g>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ========== 三条能力链 ========== -->
+  <section class="section reveal" id="chains">
+    <div class="section-head">
+      <div class="section-num">Capability Chains · 肆</div>
+      <h2>三条能力链：路由 · 图形识别 · 拍照生成发手机</h2>
+      <p class="section-lead">同一套多宝阁分格，错落陈列三条链路的关键实现——用例 A 是路由骨架，用例 B 几乎零新文件，用例 C 边界最诚实：眼镜端只做拍照与两次网络请求，生成与送达全靠外部组件。</p>
+    </div>
+
+    <div class="curio-grid">
+
+      <!-- 用例 A：路由 -->
+      <div class="curio curio-a">
+        <div class="curio-num">壹</div>
+        <h3>用例 A · 热唤醒与意图路由</h3>
+        <p class="curio-desc">Hi Rokid 唤醒 → AIUI OS 语义路由 → onLaunch 分发 → intent-router 两级匹配。</p>
+        <div class="mini-topo">
+          <svg viewBox="0 0 640 110" xmlns="http://www.w3.org/2000/svg">
+            <path class="edge" marker-end="url(#arrow)" d="M120,50 C130,50 130,50 140,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M250,50 C260,50 260,50 270,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M370,50 C380,50 380,50 390,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M500,50 C510,50 510,50 520,50"></path>
+            <g class="node n-fixed" transform="translate(10,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">语音+Hi Rokid</text><text class="node-sub" x="10" y="32">系统唤醒</text></g>
+            <g class="node n-fixed" transform="translate(140,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">AIUI OS</text><text class="node-sub" x="10" y="32">语义路由</text></g>
+            <g class="node n-mod" transform="translate(270,30)"><rect class="node-rect" width="100" height="40" rx="4"></rect><text class="node-title" x="10" y="17">onLaunch</text><text class="node-sub" x="10" y="32">options 解析</text></g>
+            <g class="node n-new" transform="translate(390,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">intent-router</text><text class="node-sub" x="10" y="32">正则+LLM兜底</text></g>
+            <g class="node n-exist" transform="translate(520,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">目标页面</text><text class="node-sub" x="10" y="32">mode=X</text></g>
+          </svg>
+        </div>
+        <ul class="points">
+          <li><strong>AGENTS.md 全部重写</strong>：现有版本是英文脚手架残留，路由匹配价值≈0；需中文身份+System Prompt+三技能触发说法穷举——路由是 LLM 语义匹配，例句就是它的 few-shot。</li>
+          <li><strong>app.js 多字段名容错</strong>：官方文档未明确 query 载荷键名，query/text/utterance/asr 全候选都摸一遍；OS 若真能传结构化 mode 则最高优先，否则从原始文本解析。</li>
+          <li><strong>intent-router 两级</strong>：正则秒判（0 成本、离线可用，顺序即优先级）→ session.prompt() 轻量 LLM 兜底，仅置信度低时调用，失败静默落 home。</li>
+          <li>路由表与 AGENTS.md 触发说法<strong>必须同步维护</strong>，否则出现「OS 路由进来了、应用内认不出」的割裂。</li>
+        </ul>
+        <div class="code-block"><span class="cm">// utils/intent-router.js 一级规则表节选</span>
+{ mode:'genimg', re:/(生成|画).{0,8}(相似|类似|模型)|发(到|给).{0,4}(手机|电话)/ }
+{ mode:'shape',  re:/(拍照|拍一?张|看看).{0,10}(识别|是什么|图形|形状)/ }
+{ mode:'caption',re:/(字幕|转写|说什么|对话|听不清|实时)/ }</div>
+        <div class="mode-badges">
+          <span class="badge badge-mod">mode=caption</span>
+          <span class="badge badge-mod">mode=shape</span>
+          <span class="badge badge-new">mode=genimg</span>
+        </div>
+      </div>
+
+      <!-- 用例 B：图形识别 -->
+      <div class="curio curio-b">
+        <div class="curio-num">贰</div>
+        <h3>用例 B · 拍照识别图形</h3>
+        <p class="curio-desc">零新文件——vision.js 加一个定制 prompt 的入口 + media 页加 shape 模式分支，链路完全复用既有解说通道。</p>
+        <div class="mini-topo">
+          <svg viewBox="0 0 640 110" xmlns="http://www.w3.org/2000/svg">
+            <path class="edge" marker-end="url(#arrow)" d="M120,50 C130,50 130,50 140,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M250,50 C260,50 260,50 270,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M370,50 C380,50 380,50 390,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M500,50 C510,50 510,50 520,50"></path>
+            <g class="node n-exist" transform="translate(10,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">camera.js</text><text class="node-sub" x="10" y="32">takePhoto</text></g>
+            <g class="node n-exist" transform="translate(140,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">pathToBase64</text><text class="node-sub" x="10" y="32">≤5MB</text></g>
+            <g class="node n-mod" transform="translate(270,30)"><rect class="node-rect" width="120" height="40" rx="4"></rect><text class="node-title" x="10" y="17">describeShape</text><text class="node-sub" x="10" y="32">定制结构化 prompt</text></g>
+            <g class="node n-exist" transform="translate(410,30)"><rect class="node-rect" width="110" height="40" rx="4"></rect><text class="node-title" x="10" y="17">Agnes 网关</text><text class="node-sub" x="10" y="32">已接</text></g>
+            <g class="node n-exist" transform="translate(540,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="10" y="17">TTS+字幕</text><text class="node-sub" x="10" y="32">分节渲染</text></g>
+          </svg>
+        </div>
+        <ul class="points">
+          <li><strong>prompt 参数化，不复制逻辑</strong>：describeImage 内部固定 prompt 抽成参数，内部函数 callVisionGateway({imageDataUrl, prompt})；describeImage 与 describeShape 都是它的薄封装，请求/降级逻辑只有一份。</li>
+          <li><strong>结构化输出 7 段</strong>：类别 / 形状构成 / 尺寸比例 / 颜色 / 文字 / 空间关系 / 可能用途，总长 ≤300 字，适合语音播报；【】分段直接按行拆开渲染成分节字幕，可读性优于整段。</li>
+          <li>media 页 <b>mode==='shape'</b> 时标题/按钮文案切换，<b>autoStart==='1'</b> 时 onReady 后直接触发拍照，跳过手动按钮。</li>
+          <li>降级保留：apiKey 未配置 / 断网 → 返回既有固定演示文案，流程不中断。</li>
+        </ul>
+        <div class="code-block"><span class="cm">// utils/vision.js 新增导出（节选）</span>
+var SHAPE_PROMPT = '你是视觉结构分析助手...严格按以下结构输出：\n' +
+  '【类别】【形状构成】【尺寸比例】【颜色】【文字】【空间关系】【可能用途】'
+export function describeShape(dataUrl) {
+  return callVisionGateway({ imageDataUrl: dataUrl, prompt: SHAPE_PROMPT })
+}</div>
+      </div>
+
+      <!-- 用例 C：生成发手机 -->
+      <div class="curio curio-c">
+        <div class="curio-num">叁</div>
+        <h3>用例 C · 拍照 → 生成相似图 → 发到手机</h3>
+        <p class="curio-desc">诚实边界先立：眼镜端只做「拍照 + 两次 wx.request + 显示取件码」；图像生成与送达手机全靠外部组件（②③ 号必须新建，非眼镜端代码）。</p>
+        <div class="mini-topo">
+          <svg viewBox="0 0 640 110" xmlns="http://www.w3.org/2000/svg">
+            <path class="edge" marker-end="url(#arrow)" d="M100,50 C108,50 108,50 116,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M206,50 C214,50 214,50 222,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M312,50 C320,50 320,50 328,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M418,50 C426,50 426,50 434,50"></path>
+            <path class="edge" marker-end="url(#arrow)" d="M524,50 C532,50 532,50 540,50"></path>
+            <g class="node n-exist" transform="translate(10,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="9" y="17">拍照</text><text class="node-sub" x="9" y="32">takePhoto</text></g>
+            <g class="node n-new" transform="translate(116,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="9" y="17">imagegen.js</text><text class="node-sub" x="9" y="32">新增</text></g>
+            <g class="node n-ext" transform="translate(222,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="9" y="17">图像生成API</text><text class="node-sub" x="9" y="32">外部·未定</text></g>
+            <g class="node n-new" transform="translate(328,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="9" y="17">phone-bridge</text><text class="node-sub" x="9" y="32">新增</text></g>
+            <g class="node n-ext" transform="translate(434,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="9" y="17">云 relay</text><text class="node-sub" x="9" y="32">必须新建</text></g>
+            <g class="node n-ext" transform="translate(540,30)"><rect class="node-rect" width="90" height="40" rx="4"></rect><text class="node-title" x="9" y="17">手机 H5</text><text class="node-sub" x="9" y="32">扫码/取件码</text></g>
+          </svg>
+        </div>
+        <div class="two-col">
+          <div>
+            <ul class="points">
+              <li><strong>imagegen.js</strong>：POST 图生图，优先要求服务端返 URL 而非 b64（relay 只中转 URL，避免眼镜端二次搬运大体积 b64）；降级为 <code>{imageUrl:'', demo:true}</code> 演示文案。</li>
+              <li><strong>phone-bridge.js</strong>：makeCode 生成 4 位取件码（语音可播报）→ pushResult 把 code+imageUrl POST 给 relay → qrDataUrl 三级降级（内置纯 JS 二维码库 → relay 代画 /qr → 只显示大号取件码+TTS 逐位播报）。</li>
+              <li>genimg 页：autoStart 拍照 → 字幕「生成中…」（生成 API 通常 5–30s，须有进度提示与超时兜底）→ 渲染二维码/取件码 + TTS「已生成相似图，手机扫码或输入取件码查看」。</li>
+            </ul>
+          </div>
+          <div>
+            <table class="mini-table">
+              <thead><tr><th>接口</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr><td>POST /push</td><td class="desc">{code, imageUrl, ttlSec} → {pullUrl}，内存/Redis 存储，TTL 过期即焚</td></tr>
+                <tr><td>GET /pull</td><td class="desc">?code=1234 → {imageUrl} | 取件码不存在或已过期</td></tr>
+                <tr><td>GET /r/{code}</td><td class="desc">手机 H5 结果页，服务端渲染 &lt;img&gt;+长按保存提示，零安装</td></tr>
+                <tr><td>GET /qr</td><td class="desc">可选：服务端生成指向 /r/{code} 的二维码 PNG</td></tr>
+              </tbody>
+            </table>
+            <div class="inline-note"><b>安全底线：</b>code 4 位 + 30 分钟 TTL + 单 code 限拉 N 次防遍历；relay 不存任何用户身份，仅做匿名短时中转。</div>
+          </div>
+        </div>
+        <div class="inline-note"><b>实现时二选一定死：</b>若所选生成 API 只回 base64，需由 relay 落地成 URL（眼镜端把 b64 POST 给 relay，relay 存文件返回 URL）——这会把 relay 契约从「只存 URL」升级为「可存图」，两种契约不能都留着，立项时必须定死一种。</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========== 落地改造清单 ========== -->
+  <section class="section reveal" id="checklist">
+    <div class="section-head">
+      <div class="section-num">Implementation Checklist · 伍</div>
+      <h2>落地改造清单 · 12 项</h2>
+      <p class="section-lead">4 项修改 · 5 项新增文件（仓库内）· 3 项新增外部组件/依赖（仓库外，非眼镜端代码）。</p>
+    </div>
+    <div class="table-wrap">
+      <table class="blackgold">
+        <thead><tr><th>#</th><th>文件</th><th>动作</th><th>一句话职责</th></tr></thead>
+        <tbody>
+          <tr><td class="mono-cell">01</td><td class="mono-cell">AGENTS.md</td><td><span class="badge badge-mod">重写</span></td><td>中文身份 + System Prompt + 三技能触发说法清单，OS 路由匹配的唯一依据</td></tr>
+          <tr><td class="mono-cell">02</td><td class="mono-cell">app.js</td><td><span class="badge badge-mod">修改</span></td><td>onLaunch/onShow 解析 options（多字段名容错）→ 调 intent-router → redirectTo 分发</td></tr>
+          <tr><td class="mono-cell">03</td><td class="mono-cell">app.json</td><td><span class="badge badge-mod">修改</span></td><td>pages 增 pages/genimg/genimg</td></tr>
+          <tr><td class="mono-cell">04</td><td class="mono-cell">utils/intent-router.js</td><td><span class="badge badge-new">新增</span></td><td>query 文本 → {mode,page,params}；正则表 + session.prompt 兜底</td></tr>
+          <tr><td class="mono-cell">05</td><td class="mono-cell">utils/vision.js</td><td><span class="badge badge-mod">修改</span></td><td>prompt 参数化，新增 describeShape（结构化图形详解 prompt）</td></tr>
+          <tr><td class="mono-cell">06</td><td class="mono-cell">pages/media/media.*</td><td><span class="badge badge-mod">修改</span></td><td>支持 mode=shape + autoStart=1：文案切换、自动拍照、走 describeShape</td></tr>
+          <tr><td class="mono-cell">07</td><td class="mono-cell">utils/imagegen.js</td><td><span class="badge badge-new">新增</span></td><td>图生图适配层（探测+降级，对齐 vision.js 模式）</td></tr>
+          <tr><td class="mono-cell">08</td><td class="mono-cell">utils/phone-bridge.js</td><td><span class="badge badge-new">新增</span></td><td>relay 客户端：makeCode / pushResult / qrDataUrl 三级降级</td></tr>
+          <tr><td class="mono-cell">09</td><td class="mono-cell">pages/genimg/*</td><td><span class="badge badge-new">新增</span></td><td>用例 C 编排页：拍照→生成→push→展示二维码/取件码</td></tr>
+          <tr><td class="mono-cell">10</td><td class="mono-cell">云端 relay 服务</td><td><span class="badge badge-ext">新增外部组件</span></td><td>/push /pull /r/{code} /qr，短时匿名中转（非眼镜端代码）</td></tr>
+          <tr><td class="mono-cell">11</td><td class="mono-cell">手机 H5 结果页</td><td><span class="badge badge-ext">新增外部组件</span></td><td>relay 的 /r/{code} 服务端渲染页，手机零安装</td></tr>
+          <tr><td class="mono-cell">12</td><td class="mono-cell">图像生成 API 接入</td><td><span class="badge badge-ext">新增外部依赖</span></td><td>选定并开通图生图供应商（Agnes 或其它，见未决项 5）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="deps-note">
+      <b>排期建议依赖序：</b> 04→02→01（路由闭环，可先用模拟 query 自测）∥ 05→06（用例 B 独立可交付）→ 10/11（relay 先行）→ 07→08→09→03（用例 C 收尾）
+    </div>
+  </section>
+
+  <!-- ========== 平台约束与诚实降级表 ========== -->
+  <section class="section reveal" id="degrade">
+    <div class="section-head">
+      <div class="section-num">Honest Degradation · 陆</div>
+      <h2>平台约束与诚实降级表</h2>
+      <p class="section-lead">凡「平台现状」栏标红的，就是平台不具备、方案也没打算假装具备的能力——全部有对应的降级/演示行为兜底，不中断流程，不隐瞒缺口。</p>
+    </div>
+    <div class="table-wrap">
+      <table class="blackgold">
+        <thead><tr><th>能力</th><th>平台现状</th><th>本方案对策</th><th>降级 / 演示行为</th></tr></thead>
+        <tbody>
+          <tr><td>自定义热词</td><td><span class="gap-text">无。</span>唤醒词固定 Hi Rokid</td><td>AGENTS.md 技能声明 + OS 语义路由等效实现</td><td>路由未命中时用户手动从启动器打开应用 → index 页保留三模式手动入口按钮</td></tr>
+          <tr><td>app.json 声明语音意图</td><td><span class="gap-text">无</span> intent/skill 字段</td><td>参数走 onLaunch/onShow options，多字段名容错解析</td><td>options 无有效 query → 落 index 主页，不报错</td></tr>
+          <tr><td>OS 传结构化模式参数</td><td><span class="gap-text">未证实</span>（见未决项 1）</td><td>不依赖：应用内 intent-router 从原始文本自行解析</td><td>文本也拿不到 → 主页 + TTS 播报「请说出要做的事或点击按钮」</td></tr>
+          <tr><td>端上多模态视觉</td><td><span class="gap-text">无</span>，session.prompt() 仅纯文本</td><td>视觉走外部 Agnes 网关（既有 vision.js）</td><td>apiKey 未配置/断网 → 返回固定演示文案（既有降级保留）</td></tr>
+          <tr><td>端上图像生成</td><td><span class="gap-text">无</span></td><td>外部图生图 API（imagegen.js）</td><td>未配置/失败 → 字幕说明「演示模式：此处应生成相似图」，流程不中断，可继续演示 relay 段</td></tr>
+          <tr><td>wx.uploadFile</td><td><span class="gap-text">无</span></td><td>图像一律 pathToBase64 后经 wx.request JSON 上送（受 media-limits 5MB 约束）</td><td>超限 → 拍照前提示、拒发并播报原因</td></tr>
+          <tr><td>眼镜→手机直推通道</td><td><span class="gap-text">无</span>应用内通道</td><td>自建云 relay + 手机 H5 扫码/取件码（方案主线）；CXR-M SDK 手机伴侣 App 为另一条原生 Android 栈，本期<b class="gap-text">不做</b>，仅列为远期替代</td><td>relay 不可达 → 字幕口述图片 URL + 大号取件码兜底；仍失败则提示稍后在眼镜端相册/历史查看</td></tr>
+          <tr><td>端上二维码渲染</td><td><span class="gap-text">无</span>内置库，网络图加载能力待验证</td><td>三级：内置纯 JS qrcode → relay 代画 /qr → 纯数字取件码</td><td>最终兜底 = 大字号取件码 + TTS 逐位播报</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ========== 未决项 ========== -->
+  <section class="section reveal" id="risks">
+    <div class="section-head">
+      <div class="section-num">Open Risks · 柒</div>
+      <h2>风险与未决项 · 8 条</h2>
+      <p class="section-lead">需向 Rokid 官方或实机确认；本方案已按最坏情形设计，若平台能力实际更强，对应模块可退化为校验层，白赚精度。</p>
+    </div>
+    <div class="gap-list">
+      <div class="gap-card"><div class="gap-num">01</div><div class="gap-body">
+        <h4>语义路由粒度</h4>
+        <p>智能体商店路由能否做到「带参数唤起指定模式」（把 mode=shape 结构化传入），还是只能唤起 Agent 并透传原始话语？——本方案按后者（最坏情形）设计，若前者可行则 intent-router 退化为校验层，白赚精度。</p>
+        <p class="verify"><b>验证法：</b>发一版含重写 AGENTS.md 的测试包，实机说三类指令，log 打印完整 onLaunch options JSON。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">02</div><div class="gap-body">
+        <h4>options.query 真实字段名与结构</h4>
+        <p>query 是 string 还是 object？键名是 query/text/utterance 中哪个？onShow 热启动时是否重复携带？——app.js 已做多候选容错，但需实机 log 定死后删冗余分支。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">03</div><div class="gap-body">
+        <h4>redirectTo 在 onLaunch 时序</h4>
+        <p>onLaunch 内立即跳页在该 QuickJS 运行时是否稳定（本方案已用 setTimeout(0) + globalData 双保险，需实测是否够）。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">04</div><div class="gap-body">
+        <h4>路由匹配率与技能描述迭代</h4>
+        <p>AGENTS.md 触发说法覆盖不足会导致「Hi Rokid 听懂了但没派给我们」；上架后需按真实 miss 语料迭代描述，确认商店更新 AGENTS.md 是否需重新审核、生效周期多长。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">05</div><div class="gap-body">
+        <h4>图像生成供应商与成本</h4>
+        <p>Agnes 网关是否开放 OpenAI 兼容的 images 图生图端点未证实；若否需另选供应商。单张生成成本 × 预期调用量，以及生成内容合规责任（用户拍到人脸/敏感物再生成的合规边界）需立项前定。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">06</div><div class="gap-body">
+        <h4>relay 合规与运维</h4>
+        <p>中转图片即使短 TTL 也属用户内容存储，需明确隐私声明、部署地域、HTTPS 证书与限流；4 位取件码的防遍历参数（TTL/次数）要压测定值。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">07</div><div class="gap-body">
+        <h4>wx image 组件加载外网图片</h4>
+        <p>relay 代画二维码方案依赖端上 &lt;image&gt; 能加载 https 网络图，需实机验证；不行则直接走取件码兜底。</p>
+      </div></div>
+      <div class="gap-card"><div class="gap-num">08</div><div class="gap-body">
+        <h4>session.prompt() 可用性与延迟</h4>
+        <p>端上 LLM 在本机型的注入情况、首 token 延迟——决定二级路由兜底是否值得保留。</p>
+      </div></div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="container">
+    <p class="foot-quote">路由质量 = AGENTS.md 写得好不好 + 应用内兜底解析强不强。两头都要做，不依赖 OS 精确传参——这是本方案在「无自定义热词」这一平台硬边界下，能拿到的最诚实的等效体验。</p>
+    <p class="foot-meta">数据来源：docs/架构-语音直呼集成.md（全文忠实转译，未夸大未臆造）· 可视化单文件自包含，无外链资源</p>
+  </div>
+</footer>
+
+<script>
+// 滚动进入视口时触发 reveal 动画
+(function () {
+  var els = document.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window)) {
+    els.forEach(function (el) { el.classList.add('in-view'); });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in-view');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.08, rootMargin: '0px 0px -60px 0px' });
+  els.forEach(function (el) { io.observe(el); });
+})();
+</script>
+
+</body>
+</html>
