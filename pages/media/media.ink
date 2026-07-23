@@ -579,7 +579,13 @@ export default {
     const that = this;
     this._voiceActive = true;
     initAsr({
-      onFinal: function (text) { that.onShapeVoiceCommand(text); }
+      onFinal: function (text) { that.onShapeVoiceCommand(text); },
+      onError: function (err) {
+        // 关键修复：此前只注册 onFinal，一次 ASR 出错后无人重启 → 常听静默失聪。
+        // 对齐 index.ink 范式，出错也自动重启（_voiceActive 守卫防离场后误重启）。
+        console.log('[media] 常听 ASR 错误: ' + ((err && err.errMsg) || (err && err.message) || err) + '，将自动重启');
+        that.scheduleShapeRestart();
+      }
     });
     startAsr({ lang: 'zh_CN' });
   },

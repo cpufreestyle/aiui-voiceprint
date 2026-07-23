@@ -90,7 +90,7 @@ export default {
     debugKey: ''
   },
 
-  onLoad() {
+  onLoad(query) {
     // 初始化 Rokid 语音识别器（无该能力时自动回退演示文本）
     initAsr({});
     this.refreshAsrMode();
@@ -99,6 +99,30 @@ export default {
       voicePromptText: isVoicePromptOn() ? '开（点击关闭）' : '关（点击开启）'
     });
     this.initRecorder();
+
+    // 语音直呼：app.js 跳转 URL 为 ?mode=caption&autoStart=1，落页应自动开始聆听；
+    // redirectTo 个别固件丢参时兜底读 globalData.launchIntent（对齐 media/genimg 页范式）。
+    const q = query || {};
+    let autoStart = q.autoStart === '1';
+    if (!autoStart) {
+      try {
+        const app = getApp();
+        const li = app && app.globalData && app.globalData.launchIntent;
+        if (li && li.route && li.route.mode === 'caption') autoStart = true;
+      } catch (e) {}
+    }
+    this._pendingAutoStart = autoStart;
+  },
+
+  // 语音直呼落地后自动开始聆听：留一拍给渲染/录音器就绪，复用现有 startListening（不新写聆听逻辑）
+  onReady() {
+    if (this._pendingAutoStart) {
+      this._pendingAutoStart = false;
+      const that = this;
+      setTimeout(function () {
+        if (!that.data.isListening) that.startListening();
+      }, 300);
+    }
   },
 
   // 安全初始化录音管理器：不同运行时 API 位置不同（wx.getRecorderManager / wx.media.getRecorderManager），
@@ -190,6 +214,7 @@ export default {
 
   onUnload() {
     this.stopListening();
+    this.teardownPausedVoice();
     this._asrStarted = false;
     stopAsr();
     if (this.recorderManager) {
@@ -275,6 +300,10 @@ export default {
 
   startListening() {
     const that = this;
+    // 从暂停态命令常听切回字幕流：先释放命令 ASR handlers，再确保字幕识别器已开
+    // （暂停时被 stopAsr 关过；_asrStarted 此时为 false，ensureAsrOpen 会真正重开并重置 handlers 为空）
+    this.teardownPausedVoice();
+    this.ensureAsrOpen();
     this.setData({
       isListening: true,
       statusBarClass: 'listening',
@@ -453,6 +482,8 @@ export default {
 
     // 2) 文字：取自 Rokid 语音识别器本窗口的识别结果（无该能力时回退占位文本）
     const text = takeLatestText() || '（未识别到文字）';
+    // 语音指令截获：整句即命令（严格短句）时执行动作、不进字幕，避免误吞正常对话
+    if (that.handleCaptionVoiceCommand(text)) return;
     that.appendSubtitle(speakerLabel, isKnown, unknownKey, text);
   },
 
@@ -593,6 +624,58 @@ export default {
     this.setData({ subtitles: [], statusText: '字幕已清空' });
   },
 
+  // 字幕聆听中的语音指令截获：只对「整句即命令」的严格短句生效，避免把正常对话
+  // 里出现的“清空/退出”等词当指令误吞。返回 true = 已作为命令消费（不进字幕）。
+  handleCaptionVoiceCommand(text) {
+    const t = (text || '').trim();
+    const m = t.match(/^(暂停聆听|停止聆听|暂停|清空字幕|清空|退出|返回主页)。?$/);
+    if (!m) return false;
+    const cmd = m[1];
+    if (cmd === '清空' || cmd === '清空字幕') { this.clearSubtitles(); speak('字幕已清空'); return true; }
+    if (cmd === '退出' || cmd === '返回主页') { this.handleBack(); return true; }
+    // 暂停/停止聆听：停字幕流，并转入命令常听（语音仍能唤醒恢复，不必靠手势）
+    this.stopListening();
+    this.setupPausedVoice();
+    return true;
+  },
+
+  // 暂停态命令常听：字幕流停止后仍开一个轻量 ASR，只听「开始聆听 / 退出」，
+  // 让全语音用户不必靠手势就能恢复。对齐 index.ink 的 setup/schedule/teardown 三件套（含 onError 重启）。
+  setupPausedVoice() {
+    if (this._pausedVoiceActive || !isAsrAvailable()) return;
+    const that = this;
+    this._pausedVoiceActive = true;
+    initAsr({
+      onFinal: function (text) {
+        const t = (text || '').trim();
+        if (/开始聆听|继续聆听|开始字幕|继续/.test(t)) { that.teardownPausedVoice(); that.startListening(); return; }
+        if (/退出|返回主页|返回/.test(t)) { that.teardownPausedVoice(); that.handleBack(); return; }
+        that.schedulePausedRestart();
+      },
+      onError: function () { that.schedulePausedRestart(); }
+    });
+    startAsr({ lang: this.data.asrLang });
+  },
+
+  schedulePausedRestart() {
+    const that = this;
+    if (this._pausedVoiceRestartTimer) return;
+    this._pausedVoiceRestartTimer = setTimeout(function () {
+      that._pausedVoiceRestartTimer = null;
+      if (!that._pausedVoiceActive || !isAsrAvailable()) return;
+      startAsr({ lang: that.data.asrLang });
+    }, 400);
+  },
+
+  teardownPausedVoice() {
+    this._pausedVoiceActive = false;
+    if (this._pausedVoiceRestartTimer) {
+      try { clearTimeout(this._pausedVoiceRestartTimer); } catch (e) {}
+      this._pausedVoiceRestartTimer = null;
+    }
+    stopAsr();
+  },
+
   onKeyDown(event) {
     this._lastFrameworkKey = Date.now();
     // 調試：把整個事件的屬性名與原始碼顯示在螢幕 debugKey 上，便於確認返回手勢的 code
@@ -612,6 +695,7 @@ export default {
 
   // 返回键：无论是否卡死，先停止聆听并退出本页，保证一定能退出来
   handleBack() {
+    try { this.teardownPausedVoice(); } catch (e) {}
     try { this.stopListening(); } catch (e) { console.log('[conversation] stopListening 异常: ' + (e && e.message ? e.message : e)); }
     safeBack();
   },

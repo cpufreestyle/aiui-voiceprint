@@ -155,11 +155,13 @@ export default {
       // 给取景组件一拍时间铺好再自动开始，避免 onReady 刚触发时相机还没就绪
       setTimeout(function () { that.startFlow(); }, 300);
     }
+    // 进页即常听语音指令（眼镜无触屏，语音是主入口；无 ASR 能力时 setupGenVoice 内部诚实降级）
+    this.setupGenVoice();
   },
 
-  onShow() { installKeyboardFallback(this); },
-  onHide() { removeKeyboardFallback(this); },
-  onUnload() { removeKeyboardFallback(this); },
+  onShow() { installKeyboardFallback(this); this.setupGenVoice(); },
+  onHide() { removeKeyboardFallback(this); this.teardownGenVoice(); },
+  onUnload() { removeKeyboardFallback(this); this.teardownGenVoice(); },
 
   vibrate() {
     const app = getApp();
@@ -389,35 +391,69 @@ export default {
     speak('重新开始');
   },
 
-  // ====== 全语音控制 ======
+  // ====== 全语音控制（进页常听：眼镜无触屏，语音是主入口，识别一句后自动重开）======
 
-  // 语音指令入口：录一句 → 解析 → 分派。生成/推送中不打断；再点一次可提前停止聆听。
+  // 进页常听：对齐 index/media 的 setup/schedule/teardown 三件套（含 onError 重启，杜绝静默失聪）。
+  setupGenVoice() {
+    if (this._voiceActive) return;
+    if (!isAsrAvailable()) {
+      this.setData({ hint: '语音不可用，短按开始、双击退出' }); // 诚实降级，不阻塞手势路径
+      return;
+    }
+    const that = this;
+    this._voiceActive = true;
+    initAsr({
+      onStart: function () { that.setData({ listening: true }); },
+      onInterim: function (partial) { that.setData({ hint: partial }); },
+      onFinal: function (finalText) {
+        that.setData({ listening: false });
+        const t = (finalText || '').trim();
+        if (t) {
+          that.setData({ hint: '识别到：' + t });
+          // 复用既有 parseGenCommand/dispatchVoice；生成/推送中的误触发由各动作的 _running 守卫挡住
+          that.dispatchVoice(parseGenCommand(t), t);
+        }
+        if (that._voiceActive) that.scheduleGenRestart(); // 退出类指令已 teardown 时不再重启
+      },
+      onError: function (err) {
+        console.log('[genimg] 常听 ASR 错误: ' + ((err && err.errMsg) || err) + '，将自动重启');
+        that.setData({ listening: false });
+        that.scheduleGenRestart();
+      }
+    });
+    startAsr({ lang: 'zh_CN' });
+  },
+
+  // 真机识别器 onStop 后需重新 start 才能听下一句，隔一拍再 start 避免同步重入
+  scheduleGenRestart() {
+    const that = this;
+    if (this._genVoiceRestartTimer) return;
+    this._genVoiceRestartTimer = setTimeout(function () {
+      that._genVoiceRestartTimer = null;
+      if (!that._voiceActive || !isAsrAvailable()) return;
+      startAsr({ lang: 'zh_CN' });
+    }, 400);
+  },
+
+  teardownGenVoice() {
+    this._voiceActive = false;
+    if (this._genVoiceRestartTimer) {
+      try { clearTimeout(this._genVoiceRestartTimer); } catch (e) {}
+      this._genVoiceRestartTimer = null;
+    }
+    stopAsr();
+  },
+
+  // 手动兜底：镜腿手势/仿真按钮唤起——未常听则开常听，已常听则补一次 start 自救
   onVoiceCommand() {
-    if (this._running) return;
-    if (this.data.listening) { stopAsr(); this.setData({ listening: false }); return; }
     if (!isAsrAvailable()) {
       this.setData({ hint: '当前设备不支持语音输入' });
       speak('当前设备不支持语音输入');
       return;
     }
-    const that = this;
-    this.setData({ listening: true, hint: '请说：开始 / 换成XX风格 / 发手机 / 返回' });
-    speak('请说指令');
-    initAsr({
-      onInterim: function (partial) { that.setData({ hint: partial }); },
-      onFinal: function (finalText) {
-        that.setData({ listening: false });
-        const t = (finalText || '').trim();
-        if (!t) { that.setData({ hint: '没听清，请再说一次' }); speak('没听清'); return; }
-        that.setData({ hint: '识别到：' + t });
-        that.dispatchVoice(parseGenCommand(t), t);
-      },
-      onError: function (err) {
-        that.setData({ listening: false, hint: '语音识别失败：' + ((err && err.errMsg) || '') });
-        speak('语音识别失败');
-      }
-    });
-    startAsr({ lang: 'zh_CN' });
+    this.setData({ hint: '请说：开始 / 换成XX风格 / 发手机 / 返回' });
+    if (!this._voiceActive) { this.setupGenVoice(); return; }
+    this.scheduleGenRestart();
   },
 
   // 按语音指令分派动作（结合当前流程阶段）
@@ -512,7 +548,7 @@ export default {
 
   // ====== 导航与手势 ======
 
-  goBackHome() { safeBack(); },
+  goBackHome() { this.teardownGenVoice(); safeBack(); },
 
   onKeyDown(event) {
     this._lastFrameworkKey = Date.now();
@@ -533,12 +569,14 @@ export default {
   // 双击：result=再来一组；其余=直接退出
   handleDoubleTap() {
     if (this.data.wizardStep === 'result') { this.resetAll(); return; }
+    this.teardownGenVoice();
     safeBack();
   },
 
-  // 滑动：切换设置面板展开/收起
+  // 滑动：前/上滑 → 设置面板；后/下滑 → 唤起/自救语音聆听（眼镜无触屏时的语音入口兜底）
   handleSwipe(direction) {
-    this.toggleSettings();
+    if (direction === 'up' || direction === 'left') { this.toggleSettings(); return; }
+    this.onVoiceCommand();
   }
 }
 </script>

@@ -71,8 +71,9 @@ curl http://localhost:8262/pull?code=1234
 
 ## 与眼镜端 `utils/phone-bridge.js` 的对应关系
 
-规格文档 §5.2 定义的眼镜端 relay 客户端 `utils/phone-bridge.js`（尚未随本次
-交付创建，属于 .aix 端后续工作）需要配置：
+规格文档 §5.2 定义的眼镜端 relay 客户端 `utils/phone-bridge.js` 已实现（`pushResult`
+上报取件码、`qrImageUrl` 取二维码地址、`getRelayBase`/`setRelayBase` 读写服务地址），
+由 `pages/genimg` 在生成图片后调用。其中 RELAY_BASE 默认值与「设置面板」覆盖方式：
 
 ```javascript
 var RELAY_BASE = 'https://nieao.site/relay'   // 与本服务部署地址一致，存 storage 可配置

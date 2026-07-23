@@ -281,6 +281,14 @@ export default {
     });
   },
 
+  // 语音「生成相似图 / 发到手机」直达：进入生成页并自动跑全流程（autoStart=1）
+  goToGenimg() {
+    this.teardownVoiceControl();
+    wx.navigateTo({
+      url: '/pages/genimg/genimg?mode=genimg&autoStart=1'
+    });
+  },
+
   // ====== 语音控制（app 内 ASR 常听：不依赖系统语音路由，自己听自己拍）======
 
   // 进入主页即开始常听语音指令；无 ASR 能力（仿真/非 Rokid 设备）时诚实降级为
@@ -313,7 +321,7 @@ export default {
     });
     this.setData({ asrModeText: asrMode() === 'rokid' ? 'Rokid ASR 聆听中' : '演示模式（模拟语音）' });
     startAsr({ lang: 'zh_CN' });
-    speak('已进入听障助手，当前默认拍照识别，说"开始拍照"即可，或说对话字幕、录入声纹、验证身份');
+    speak('已进入听障助手，当前默认拍照识别，说"开始拍照"即可，或说对话字幕、生成相似图、录入声纹、验证身份');
   },
 
   // 真机识别器每次 onStop（=一次 onFinal/onError）后需要重新 start 才能继续听下一句。
@@ -357,6 +365,10 @@ export default {
     }
     if (route.mode === 'caption' && route.confidence >= 0.9) {
       this.goToConversation();
+      return true;
+    }
+    if (route.mode === 'genimg' && route.confidence >= 0.9) {
+      this.goToGenimg();
       return true;
     }
     if (route.mode === 'home' && route.confidence >= 0.9) {

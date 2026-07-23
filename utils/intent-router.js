@@ -9,8 +9,8 @@
  *
  * 两级路由：
  *   1) 一级：关键词/正则路由表，命中即返回，0 成本、离线可用（本模块主路径）；
- *   2) 二级：session.prompt() 端上纯文本 LLM 兜底，只在一级置信度低（说法太怪的长尾）时
- *      才调用；能力探测失败或调用失败一律静默落回一级结果（本就是 home）。
+ *   2) 二级：端上 LLM 兜底（Rokid 官方 LanguageModel.create() → s.prompt()，按需创建、非全局单例），
+ *      只在一级置信度低（说法太怪的长尾）时才调用；能力不可用/创建或推理失败/超时一律静默落回一级结果。
  *
  * 路由表与 AGENTS.md 的技能触发说法清单必须同步维护，否则会出现
  * 「OS 路由进来了、应用内认不出」的割裂。
@@ -61,30 +61,46 @@ export function routeIntent(raw) {
 }
 
 /**
- * 二级兜底：一级置信度不足时，尝试用端上纯文本 LLM（session.prompt）分类。
- * 能力探测失败 / 调用失败一律静默走一级结果（此时一级结果必为 home，不会抛错到调用方）。
+ * 二级兜底：一级置信度不足时，尝试用 Rokid 端上 LLM（LanguageModel.create() → prompt）分类。
+ * 能力不可用 / 创建或推理失败 / 超时一律静默走一级结果（此时一级结果必为 home，不会抛错到调用方）。
  * @param {string} raw 原始 query 文本
  * @param {(route: {mode:string, page:string, params:object, confidence:number}) => void} cb
  */
 export function routeIntentSmart(raw, cb) {
   const quick = routeIntent(raw);
 
-  // 能力探测：QuickJS 环境不保证注入 session；typeof 检查必须放在最前面短路，
-  // 避免直接引用未声明的 session 触发 ReferenceError。
-  if (quick.confidence >= 0.9 || typeof session === 'undefined' || !session || typeof session.prompt !== 'function') {
+  // 能力探测：Rokid 端上 LLM 是 LanguageModel.create() 工厂（官方明确「按需创建、非全局单例」，
+  // 无全局单例入口）。typeof 检查放最前短路，避免引用未声明标识符触发 ReferenceError。
+  if (quick.confidence >= 0.9 ||
+      typeof LanguageModel === 'undefined' || !LanguageModel ||
+      typeof LanguageModel.create !== 'function') {
     cb(quick);
     return;
   }
 
+  // 防重复回调 + 超时兜底：LLM 创建/推理挂起时不能卡住启动分发，3s 未回落一级结果。
+  let done = false;
+  const finish = (r) => { if (!done) { done = true; cb(r); } };
+  const timer = setTimeout(() => finish(quick), 3000);
+
   const prompt = '将指令分类为其中一个词并只输出该词：caption/shape/genimg/home。指令：' + raw;
-  session.prompt(prompt).then(function (out) {
-    const m = String(out || '').trim().toLowerCase();
-    if (MODE_PAGE[m]) {
-      cb({ mode: m, page: MODE_PAGE[m], params: { q: raw }, confidence: 0.7 });
-    } else {
-      cb(quick); // LLM 输出不在词表内，落回一级结果（home）
-    }
-  }).catch(function () {
-    cb(quick); // 调用失败，静默落回一级结果（home）
-  });
+  let sess = null;
+  try {
+    LanguageModel.create({})
+      .then((s) => { sess = s; return s.prompt(prompt); })
+      .then((out) => {
+        clearTimeout(timer);
+        const m = String(out || '').trim().toLowerCase();
+        if (MODE_PAGE[m]) finish({ mode: m, page: MODE_PAGE[m], params: { q: raw }, confidence: 0.7 });
+        else finish(quick); // 输出不在词表内，落回一级结果（home）
+      })
+      .catch(() => { clearTimeout(timer); finish(quick); }) // 创建/推理失败，静默落回一级
+      .then(() => { // 无论成败，会话有 destroy 能力就释放（按需创建、不留单例）
+        try { if (sess && typeof sess.destroy === 'function') sess.destroy(); } catch (e) {}
+      });
+  } catch (e) {
+    // LanguageModel.create 同步抛错（而非返回 rejected Promise）也要兜住，绝不污染启动分发栈
+    clearTimeout(timer);
+    finish(quick);
+  }
 }

@@ -1,36 +1,32 @@
 /**
- * 图生图（相似图生成）适配层 —— 用例C「拍照→生成相似图→发手机」的生成环节
+ * 相似图生成适配层 —— 用例C「拍照→生成相似图→发手机」的生成环节
  *
- * 平台事实（与 utils/vision.js 同源约束，见 docs/架构-语音直呼集成.md §5.1）：
+ * 平台事实（见 docs/架构-语音直呼集成.md §5.1 + Rokid 官方文档 + 2026-07 实测）：
  *   - 端上无图像生成能力；网络只有 wx.request，没有 wx.uploadFile；
- *   - 因此无法走标准 OpenAI multipart 的 /images/edits（那需要 uploadFile 传文件），
- *     改用 JSON body（图片以 data URL/base64 内嵌）POST 到外部图像生成网关——
- *     形态对齐 vision.js 已验证可行的 chat/completions 多模态请求写法。
+ *   - 标准「图生图」/images/edits 需 multipart 上传文件（uploadFile），端上做不到；
+ *   - 实测：图像模型打 /chat/completions 会确定性 404，文生图须走 /images/generations
+ *     （返回 { data: [{ url }] }，agnes-image-2.1-flash + 1024x1024 已实测出图成功）。
+ *   → 因此用「图→文→图」两跳近似图生图：先用 vision.describeImage 把照片转成画面描述，
+ *     再把描述交给 /images/generations 文生图，得到风格/主体相近的新图。
  *
  * 设计（对齐 vision.js 的「能力探测 + demo 降级」范式）：
- *   - 已配置 apiKey 且有 wx.request → 真机联网生成；
- *   - 未配置 / 无网络能力 / 请求失败 → 降级为演示文案，绝不冒充真实生成结果。
- *   - generateSimilar 永不 reject：失败一律 resolve 一个带 demo/error 标注的对象，
- *     由调用方（pages/genimg）据此渲染诚实的降级字幕。
+ *   - 已配置 apiKey 且有 wx.request → 真机联网生成；否则/失败 → 演示文案，绝不冒充真实生成。
+ *   - generateSimilar 永不 reject：失败一律 resolve 带 demo/error 标注的对象，pages/genimg 诚实降级。
+ *   - 换风格重生成：调用方传 opts.baseDesc 复用首次的画面描述，免二次视觉调用；成功回传 basedOn 供缓存。
  *
- * 安全：apiKey 不硬编码，存本地 storage（imagegen_config），由用户在设置面板填入。
- *
- * 供应商未最终选型（见文档 §8-5，未决项）：响应解析做多形态兼容尝试——
- *   ① OpenAI images 接口形态 { data: [{ url | b64_json }] }；
- *   ② chat/completions 多模态网关把图片挂在 message.images / content 分段；
- *   ③ 纯文本 content 里夹带图片链接或 data:image base64（兜底粗提取）。
- *   全部解析不到则判定为失败，交由降级路径处理。
+ * 安全：apiKey 统一读 cloud-ai.js 内置 Agnes Key（与主持人V2同一个），用户可在设置面板覆盖。
  */
 
 import wx from 'wx';
-import { AGNES_API_KEY, AGNES_BASE_URL, AGNES_IMAGE_MODEL } from './cloud-ai.js';
+import { AGNES_API_KEY, AGNES_IMAGE_URL, AGNES_IMAGE_MODEL } from './cloud-ai.js';
+import { describeImage } from './vision.js';
 
 const STORAGE_KEY = 'imagegen_config';
 
 // 默认配置：与 vision.js 共用 cloud-ai.js 里同一个内置 Agnes Key/网关（统一多模态）。
 // 测试版无需在眼镜端填 Key；用户仍可在设置面板临时覆盖（storage 优先级更高）。
 const DEFAULT_CONFIG = {
-  baseUrl: AGNES_BASE_URL,
+  baseUrl: AGNES_IMAGE_URL, // 文生图端点 /images/generations（实测可用；chat 端点会 404）
   apiKey: AGNES_API_KEY,
   model: AGNES_IMAGE_MODEL
 };
@@ -50,7 +46,7 @@ export function getImagegenConfig() {
   const cfg = Object.assign({}, DEFAULT_CONFIG, saved || {});
   // 内置测试 Key 兜底：避免历史「清除密钥」在 storage 留下空串把内置 Key 覆盖成空。
   if (!cfg.apiKey) cfg.apiKey = AGNES_API_KEY;
-  if (!cfg.baseUrl) cfg.baseUrl = AGNES_BASE_URL;
+  if (!cfg.baseUrl) cfg.baseUrl = AGNES_IMAGE_URL;
   return cfg;
 }
 
@@ -72,25 +68,18 @@ export function imagegenMode() {
   return isImagegenConfigured() ? 'live' : 'demo';
 }
 
-// 构造请求体：图片以 data URL 内嵌，要求模型参照原图生成风格/构图相似的新图。
-function buildRequestBody(cfg, dataUrl, opts) {
-  const url = dataUrl.indexOf('data:') === 0 ? dataUrl : ('data:image/jpeg;base64,' + dataUrl);
+// 构造文生图请求体（/images/generations 形态）：把「画面描述」拼成生成 prompt。
+// desc 来自 vision.describeImage 对照片的结构化描述（或 opts.baseDesc 缓存）。
+function buildGenBody(cfg, desc, opts) {
   const style = (opts && opts.style) || '相似示意图';
-  const size = (opts && opts.size) || '1024x1024';
-  const prompt = '参照这张照片，生成一张风格相近、主体结构相似的' + style +
-    '。请直接返回生成图片（URL 或 base64），不要输出多余文字说明。';
+  const extra = (opts && opts.extra) ? ('，' + opts.extra) : '';
+  const size = (opts && opts.size) || '1024x1024'; // 实测正方形可用；16:9 建议 1280x720
+  const prompt = '参照以下画面描述，生成一张风格相近、主体结构相似的' + style + '：' + desc + extra;
   return {
     model: cfg.model,
+    prompt: prompt,
     size: size,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: url } }
-        ]
-      }
-    ]
+    n: 1
   };
 }
 
@@ -186,29 +175,39 @@ function postImagegen(cfg, body) {
 }
 
 /**
- * 生成一张与输入图相似的图。
- * @param {string} dataUrl 拍照 base64（data:image/...;base64,xxx 或纯 base64）；
- *   为空（如无相机时的演示拍照）也会直接走演示降级。
- * @param {Object} [opts] { style, size }
- * @returns {Promise<{ok:boolean, imageUrl:string, demo?:boolean, text?:string, error?:string}>}
+ * 生成一张与输入图相似的图（图→文→图两跳）。
+ * @param {string} dataUrl 拍照 base64（data:image/...;base64,xxx 或纯 base64）；换风格重生成时可传 null。
+ * @param {Object} [opts] { style, size, extra, baseDesc }
+ *   - baseDesc：首次生成缓存的画面描述；有它则跳过视觉调用直接文生图（换风格重生成用）。
+ *   - extra：追加到 prompt 的风格扩写词（如「水彩风格」）。
+ * @returns {Promise<{ok:boolean, imageUrl:string, demo?:boolean, text?:string, basedOn?:string, error?:string}>}
  *   永不 reject：
- *     - 未配置/无输入图 → { ok:true, imageUrl:'', demo:true, text: 演示文案 }
- *     - 真机请求成功    → { ok:true, imageUrl: 生成图地址, demo:false }
- *     - 真机请求失败    → { ok:false, imageUrl:'', demo:true, text: 演示文案, error }
+ *     - 未配置/无底稿来源 → { ok:true, imageUrl:'', demo:true, text: 演示文案 }
+ *     - 生成成功         → { ok:true, imageUrl: 生成图地址, demo:false, basedOn: 画面描述 }
+ *     - 描述/生成失败     → { ok:false, imageUrl:'', demo:true, text: 演示文案, error }
  */
 export function generateSimilar(dataUrl, opts) {
   const cfg = getImagegenConfig();
-  if (!isImagegenConfigured() || !dataUrl) {
+  const baseDesc = opts && opts.baseDesc;
+  // 需要「有网络+key」且「有底稿来源」：底稿 = 现成 baseDesc，或一张可供描述的照片
+  if (!isImagegenConfigured() || (!dataUrl && !baseDesc)) {
     return Promise.resolve({ ok: true, imageUrl: '', demo: true, text: DEMO_TEXT });
   }
-  const body = buildRequestBody(cfg, dataUrl, opts);
-  return postImagegen(cfg, body)
-    .then((url) => ({ ok: true, imageUrl: url, demo: false }))
-    .catch((e) => ({
-      ok: false,
-      imageUrl: '',
-      demo: true,
-      text: DEMO_TEXT,
-      error: (e && e.message) || String(e)
-    }));
+
+  // 第一跳：拿画面描述。换风格重生成传了 baseDesc 就直接复用（可信、免二次视觉调用）；
+  // 否则用 vision.describeImage 真实描述照片——若视觉未走 live（失败/降级）则不拿演示文案冒充。
+  const descPromise = baseDesc
+    ? Promise.resolve({ text: baseDesc, live: true })
+    : describeImage(dataUrl).then((r) => ({ text: (r && r.text) || '', live: !!(r && r.mode === 'live') }));
+
+  return descPromise.then((d) => {
+    if (!d.text || !d.live) {
+      return { ok: false, imageUrl: '', demo: true, text: DEMO_TEXT, error: d.text ? '照片描述未走真实视觉，放弃生成以免出错图' : '照片描述失败' };
+    }
+    // 第二跳：把描述交给 /images/generations 文生图
+    const body = buildGenBody(cfg, d.text, opts);
+    return postImagegen(cfg, body)
+      .then((url) => ({ ok: true, imageUrl: url, demo: false, basedOn: d.text }))
+      .catch((e) => ({ ok: false, imageUrl: '', demo: true, text: DEMO_TEXT, error: (e && e.message) || String(e) }));
+  });
 }

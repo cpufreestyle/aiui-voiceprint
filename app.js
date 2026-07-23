@@ -1,5 +1,5 @@
 import wx from 'wx';
-import { routeIntent, MODE_PAGE } from './utils/intent-router.js';
+import { routeIntentSmart, MODE_PAGE } from './utils/intent-router.js';
 
 export default {
   onLaunch: function (options) {
@@ -32,38 +32,45 @@ export default {
     }
     var explicitMode = q.mode || opt.mode || ''; // OS 若真能传结构化 mode，最高优先
 
-    var route;
-    if (explicitMode && MODE_PAGE[explicitMode]) {
-      route = { mode: explicitMode, page: MODE_PAGE[explicitMode], params: {}, confidence: 1 };
-    } else {
-      route = routeIntent(raw); // 从原始文本解析（主路径，不依赖 OS 精确传参）
-    }
+    var self = this;
+    // 取得 route 后的分发逻辑抽成闭包：既服务于 explicitMode 同步分支，也作为
+    // routeIntentSmart 的异步回调（一级高置信时其内部同步回调，时序与现状一致）。
+    var applyRoute = function (route) {
+      console.log('语音直呼路由: raw="' + raw + '" mode=' + (route && route.mode) + ' page=' + (route && route.page));
+      self.globalData.launchIntent = { raw: raw, route: route, at: Date.now() };
 
-    console.log('语音直呼路由: raw="' + raw + '" mode=' + (route && route.mode) + ' page=' + (route && route.page));
-    this.globalData.launchIntent = { raw: raw, route: route, at: Date.now() };
+      if (!route || route.mode === 'home') return; // 冷启动默认落 index 主页，不跳转
 
-    if (!route || route.mode === 'home') return; // 冷启动默认落 index 主页，不跳转
+      var url = route.page + '?mode=' + route.mode + '&autoStart=1&q=' + encodeURIComponent(raw);
+      var wxNav = (typeof wx !== 'undefined' && wx) ? wx : {};
+      var doRedirect = function () {
+        if (typeof wxNav.redirectTo !== 'function') {
+          console.log('语音直呼跳转失败: 当前环境不支持 redirectTo，保留在主页');
+          return;
+        }
+        try {
+          wxNav.redirectTo({ url: url });
+        } catch (e) {
+          console.log('语音直呼跳转失败: ' + (e && e.message ? e.message : e));
+        }
+      };
 
-    var url = route.page + '?mode=' + route.mode + '&autoStart=1&q=' + encodeURIComponent(raw);
-    var wxNav = (typeof wx !== 'undefined' && wx) ? wx : {};
-    var doRedirect = function () {
-      if (typeof wxNav.redirectTo !== 'function') {
-        console.log('语音直呼跳转失败: 当前环境不支持 redirectTo，保留在主页');
-        return;
-      }
-      try {
-        wxNav.redirectTo({ url: url });
-      } catch (e) {
-        console.log('语音直呼跳转失败: ' + (e && e.message ? e.message : e));
+      if (isLaunch) {
+        // onLaunch 时页面栈可能未就绪，延迟一拍再跳（双保险：globalData.launchIntent 已写入，
+        // 页面 onLoad 兜底读取，防止 redirectTo 传参在个别固件上丢失）
+        setTimeout(doRedirect, 0);
+      } else {
+        doRedirect();
       }
     };
 
-    if (isLaunch) {
-      // onLaunch 时页面栈可能未就绪，延迟一拍再跳（双保险：globalData.launchIntent 已写入，
-      // 页面 onLoad 兜底读取，防止 redirectTo 传参在个别固件上丢失）
-      setTimeout(doRedirect, 0);
+    if (explicitMode && MODE_PAGE[explicitMode]) {
+      // OS 直接给了结构化 mode：最高优先，同步分发
+      applyRoute({ mode: explicitMode, page: MODE_PAGE[explicitMode], params: {}, confidence: 1 });
     } else {
-      doRedirect();
+      // 从原始文本解析：一级正则高置信时 routeIntentSmart 内部同步回调（行为同现状），
+      // 只有低置信长尾才异步走端上 LLM（最多 3s 超时兜底），接通二级路由。
+      routeIntentSmart(raw, applyRoute);
     }
   },
 
