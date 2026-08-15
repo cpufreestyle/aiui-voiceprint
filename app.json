@@ -3,7 +3,6 @@
     "pages/index/index",
     "pages/enroll/enroll",
     "pages/verify/verify",
-    "pages/result/result",
     "pages/conversation/conversation"
   ],
   "window": {

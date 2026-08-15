@@ -27,7 +27,8 @@
             "properties": {
               "id": { "type": "string", "description": "用户唯一标识" },
               "name": { "type": "string", "description": "用户姓名" },
-              "enrolledAt": { "type": "number", "description": "注册时间戳" }
+              "enrolledAt": { "type": "number", "description": "注册时间戳" },
+              "selectedClass": { "type": "string", "description": "预留选中样式类（用户列表恒为空）" }
             }
           }
         },
@@ -43,6 +44,7 @@
             "type": "object",
             "properties": {
               "key": { "type": "string", "description": "菜单项标识" },
+              "id": { "type": "string", "description": "菜单项标识（与 key 一致，供模板绑定）" },
               "label": { "type": "string", "description": "菜单项显示文字" },
               "selectedClass": { "type": "string", "description": "当前是否高亮选中的样式类（selected 或空）" }
             }
@@ -71,9 +73,9 @@ export default {
     registeredUsers: [],
     viewMode: 'list',
     menuItems: [
-      { key: 'enroll', label: '录入声纹', selectedClass: 'selected' },
-      { key: 'verify', label: '验证身份', selectedClass: '' },
-      { key: 'conversation', label: '对话字幕', selectedClass: '' }
+      { key: 'enroll', id: 'enroll', label: '录入声纹', selectedClass: 'selected' },
+      { key: 'verify', id: 'verify', label: '验证身份', selectedClass: '' },
+      { key: 'conversation', id: 'conversation', label: '对话字幕', selectedClass: '' }
     ],
     selectedIndex: 0,
     // 预计算文本，避免模板三元式触发 ink 静态检查告警（missing from data）
@@ -176,7 +178,8 @@ export default {
         registeredUsers: users.map((u) => ({
           id: u.id,
           name: u.name,
-          enrolledAt: this.formatTime(u.enrolledAt)
+          enrolledAt: this.formatTime(u.enrolledAt),
+          selectedClass: ''
         }))
       });
     }
@@ -262,24 +265,24 @@ export default {
     <view class="action-row">
       <view
         class="menu-item {{item.selectedClass}}"
-        ink:for="{{menuItems}}"
-        ink:key="key"
+        wx:for="{{menuItems}}"
+        wx:key="key"
         bindtap="enterSelected">
         <text class="menu-text">{{item.label}}</text>
       </view>
     </view>
 
-    <view class="view-toggle" ink:if="{{userCount > 0}}">
+    <view class="view-toggle" wx:if="{{userCount > 0}}">
       <button class="btn-toggle" bindtap="toggleViewMode">
         <text>{{toggleText}}</text>
       </button>
     </view>
 
-    <view class="users-section" ink:if="{{userCount > 0}}">
+    <view class="users-section" wx:if="{{userCount > 0}}">
       <text class="section-title">已注册声纹</text>
       
-      <scroll-view class="user-list" scroll-y="true" ink:if="{{viewMode === 'list'}}">
-        <view class="user-card" ink:for="{{registeredUsers}}" ink:key="id">
+      <scroll-view class="user-list" scroll-y="true" wx:if="{{viewMode === 'list'}}">
+        <view class="user-card" wx:for="{{registeredUsers}}" wx:key="id">
           <view class="user-info">
             <text class="user-name">{{item.name}}</text>
             <text class="user-time">{{item.enrolledAt}}</text>
@@ -290,20 +293,20 @@ export default {
         </view>
       </scroll-view>
 
-      <view class="user-grid" ink:if="{{viewMode === 'grid'}}">
-        <view class="grid-card" ink:for="{{registeredUsers}}" ink:key="id" bindtap="deleteUser" data-id="{{item.id}}">
+      <view class="user-grid" wx:if="{{viewMode === 'grid'}}">
+        <view class="grid-card" wx:for="{{registeredUsers}}" wx:key="id" bindtap="deleteUser" data-id="{{item.id}}">
           <text class="grid-name">{{item.name}}</text>
           <text class="grid-time">{{item.enrolledAt}}</text>
         </view>
       </view>
     </view>
 
-    <view class="empty-state" ink:if="{{userCount === 0}}">
+    <view class="empty-state" wx:if="{{userCount === 0}}">
       <text class="empty-text">暂无声纹记录</text>
       <text class="empty-hint">点击"录入声纹"开始</text>
     </view>
 
-    <view class="footer" ink:if="{{userCount > 0}}">
+    <view class="footer" wx:if="{{userCount > 0}}">
       <button class="btn-clear" bindtap="clearAllUsers">
         <text>清空全部</text>
       </button>

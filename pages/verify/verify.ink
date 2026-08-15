@@ -56,15 +56,12 @@
 
 <script setup>
 import wx from 'wx';
-import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { safeBack } from '../../utils/gesture.js';
+import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
 import { acquireRecorderManager } from '../../utils/recorder.js';
-import { extractFeatures, identifySpeaker } from '../../utils/voiceprint-engine.js';
+import { extractFeatures, identifySpeaker, isRecordingValid } from '../../utils/voiceprint-engine.js';
 import { setupRecorderListeners, startRecordingSession, stopRecordingSession } from '../../utils/recording-session.js';
 import { speak } from '../../utils/tts.js';
-
-// 录音有效性门槛（与注册页一致）：低于此值视为「没采到有效音频」，不进入比对。
-const MIN_AUDIO_BYTES = 1600;
-const MIN_ENERGY = 1e-6;
 
 export default {
   data: {
@@ -90,16 +87,20 @@ export default {
       this.recorderManager.offFrameRecorded();
     }
     // 释放 window 级键盘兜底监听（redirectTo/navigateBack 走 onUnload，不一定触发 onHide）
-    removeKeyboardFallback(this);
+    shellRemoveKeyboard(this);
   },
 
   onShow() {
-    installKeyboardFallback(this);
+    shellInstallKeyboard(this);
   },
 
   onHide() {
-    removeKeyboardFallback(this);
+    shellRemoveKeyboard(this);
   },
+
+  onKeyDown: gestureKeyDown,
+
+  onKeyUp: gestureKeyUp,
 
     startVerification() {
       startRecordingSession(this, {
@@ -142,9 +143,7 @@ export default {
 
         // 录音无效（太短 / 静音）直接提示重试，不进入比对——
         // 否则全 0 特征会给出误导性分数（可能误判成功或以假分数拒绝）。
-        const tooShort = !audioData || audioData.length < MIN_AUDIO_BYTES;
-        const silent = !features || !(features.meanEnergy > MIN_ENERGY);
-        if (tooShort || silent) {
+        if (!isRecordingValid(audioData, features)) {
           const invalid = {
             success: false,
             confidence: '0.00',
@@ -214,16 +213,6 @@ export default {
         frameBuffers: []
       });
     },
-
-  onKeyDown(event) {
-    this._lastFrameworkKey = Date.now();
-    routeKeyEvent(this, event, 'down');
-  },
-
-  onKeyUp(event) {
-    if (!event) return;
-    routeKeyEvent(this, event, 'up');
-  },
 
   // 镜腿短按：进入 - 开始验证 / 完成后重新验证
   handleTap() {

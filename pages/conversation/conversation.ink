@@ -45,7 +45,8 @@
 
 <script setup>
 import wx from 'wx';
-import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { routeKeyEvent, safeBack } from '../../utils/gesture.js';
+import { gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
 import { acquireRecorderManager, probeRecordingApis } from '../../utils/recorder.js';
 import { extractFeatures, createTemplate, identifySpeaker, combineFrames, generateWaveform } from '../../utils/voiceprint-engine.js';
 import { initAsr, startAsr, stopAsr, takeLatestText, asrMode, isAsrAvailable } from '../../utils/asr.js';
@@ -110,7 +111,7 @@ export default {
   },
 
   onShow() {
-    installKeyboardFallback(this);
+    shellInstallKeyboard(this);
     // 平台契约：语音唤醒后，当前 Interactive InkView 须在 2 秒内“开启 ASR”，
     // 否则报“语音唤醒已超时，Interactive InkView 未在 2 秒内开启 ASR”。
     // 对话字幕页作为活动视图，一旦可见/被唤醒激活就立即开启 ASR，满足契约。
@@ -118,7 +119,7 @@ export default {
   },
 
   onHide() {
-    removeKeyboardFallback(this);
+    shellRemoveKeyboard(this);
   },
 
   // 刷新 ASR 模式标识（真实 / 演示）
@@ -192,7 +193,7 @@ export default {
       this.recorderManager.offStop();
     }
     // 释放 window 级键盘兜底监听（redirectTo/navigateBack 走 onUnload，不一定触发 onHide）
-    removeKeyboardFallback(this);
+    shellRemoveKeyboard(this);
   },
 
   setupRecorderListeners() {
@@ -577,10 +578,7 @@ export default {
     routeKeyEvent(this, event, 'down');
   },
 
-  onKeyUp(event) {
-    if (!event) return;
-    routeKeyEvent(this, event, 'up');
-  },
+  onKeyUp: gestureKeyUp,
 
   // 返回键：无论是否卡死，先停止聆听并退出本页，保证一定能退出来
   handleBack() {

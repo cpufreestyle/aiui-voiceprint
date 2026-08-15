@@ -442,3 +442,18 @@ export function generateWaveform(frameBuffer, numPoints = 20) {
 
   return points.slice(-numPoints);
 }
+
+// =====================
+// 录音有效性校验（enroll / verify 共用，避免两页逐字重复阈值）
+// =====================
+
+// 门槛：低于此值视为「没采到有效音频」，不计入样本 / 不进入比对，避免坏样本污染声纹模板。
+// MIN_AUDIO_BYTES 约 50ms（16000Hz·16bit·单声道 = 32 字节/ms）；MIN_ENERGY 挡近全静音。
+export const MIN_AUDIO_BYTES = 1600;
+export const MIN_ENERGY = 1e-6;
+
+export function isRecordingValid(audio, features) {
+  const tooShort = !audio || audio.length < MIN_AUDIO_BYTES;
+  const silent = !features || !(features.meanEnergy > MIN_ENERGY);
+  return !tooShort && !silent;
+}

@@ -42,16 +42,12 @@
 
 <script setup>
 import wx from 'wx';
-import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { safeBack } from '../../utils/gesture.js';
+import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
 import { acquireRecorderManager } from '../../utils/recorder.js';
-import { extractFeatures, createTemplate } from '../../utils/voiceprint-engine.js';
+import { extractFeatures, createTemplate, isRecordingValid } from '../../utils/voiceprint-engine.js';
 import { setupRecorderListeners, startRecordingSession, stopRecordingSession } from '../../utils/recording-session.js';
 import { speak } from '../../utils/tts.js';
-
-// 录音有效性门槛：低于此值视为「没采到有效音频」，不计入样本，避免坏样本污染声纹模板。
-// MIN_AUDIO_BYTES 约 50ms（16000Hz·16bit·单声道 = 32 字节/ms）；MIN_ENERGY 挡近全静音。
-const MIN_AUDIO_BYTES = 1600;
-const MIN_ENERGY = 1e-6;
 
 export default {
   data: {
@@ -94,16 +90,20 @@ export default {
       this.recorderManager.offFrameRecorded();
     }
     // 释放 window 级键盘兜底监听（redirectTo/navigateBack 走 onUnload，不一定触发 onHide）
-    removeKeyboardFallback(this);
+    shellRemoveKeyboard(this);
   },
 
   onShow() {
-    installKeyboardFallback(this);
+    shellInstallKeyboard(this);
   },
 
   onHide() {
-    removeKeyboardFallback(this);
+    shellRemoveKeyboard(this);
   },
+
+  onKeyDown: gestureKeyDown,
+
+  onKeyUp: gestureKeyUp,
 
     startRecording() {
       // 设置本次要朗读的句子（按已完成样本数取对应提示）
@@ -139,9 +139,7 @@ export default {
           } catch (e) {
             console.log('提取特征失败: ' + e);
           }
-          const tooShort = !combinedAudio || combinedAudio.length < MIN_AUDIO_BYTES;
-          const silent = !features || !(features.meanEnergy > MIN_ENERGY);
-          if (tooShort || silent) {
+          if (!isRecordingValid(combinedAudio, features)) {
             // 本次录音无效：清掉待定特征、退回未录状态，提示重录
             that.data.pendingFeature = null;
             that.setData({ recorded: false, status: '没录到清晰声音，请靠近麦克风重录' });
@@ -260,16 +258,6 @@ export default {
     cancelEnroll() {
       safeBack();
     },
-
-  onKeyDown(event) {
-    this._lastFrameworkKey = Date.now();
-    routeKeyEvent(this, event, 'down');
-  },
-
-  onKeyUp(event) {
-    if (!event) return;
-    routeKeyEvent(this, event, 'up');
-  },
 
   // 镜腿短按：单键推进整条流程
   // 录音中→停止；已录待存→保存样本；已满 3 个样本→完成注册；否则→开始录音。

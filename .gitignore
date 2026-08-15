@@ -8,3 +8,6 @@ node_modules/
 # Logs / temp
 *.log
 .cache/
+
+# Local IDE / agent workspace data (not part of the app)
+.codebuddy/
