@@ -63,7 +63,8 @@
 
 <script setup>
 import wx from 'wx';
-import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { gestureKeyDown, gestureKeyUp } from '../../utils/page-shell.js';
 import { getActiveUser, setActiveUser, reconcileActiveUser } from '../../utils/active-user.js';
 
 export default {
@@ -102,15 +103,8 @@ export default {
     removeKeyboardFallback(this);
   },
 
-  onKeyDown(event) {
-    this._lastFrameworkKey = Date.now();
-    routeKeyEvent(this, event, 'down');
-  },
-
-  onKeyUp(event) {
-    if (!event) return;
-    routeKeyEvent(this, event, 'up');
-  },
+  onKeyDown: gestureKeyDown,
+  onKeyUp: gestureKeyUp,
   // 镜腿短按：进入当前高亮选中的功能
   handleTap() {
     this.enterSelected();

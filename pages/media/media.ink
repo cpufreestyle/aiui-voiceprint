@@ -50,7 +50,8 @@
 
 <script setup>
 import wx from 'wx';
-import { routeKeyEvent, installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
+import { gestureKeyDown, gestureKeyUp } from '../../utils/page-shell.js';
 import { speak } from '../../utils/tts.js';
 import {
   acquireCameraContext, isCameraAvailable, takePhoto,
@@ -475,14 +476,8 @@ export default {
   // ====== 导航与手势 ======
   goBackHome() { safeBack(); },
 
-  onKeyDown(event) {
-    this._lastFrameworkKey = Date.now();
-    routeKeyEvent(this, event, 'down');
-  },
-  onKeyUp(event) {
-    if (!event) return;
-    routeKeyEvent(this, event, 'up');
-  },
+  onKeyDown: gestureKeyDown,
+  onKeyUp: gestureKeyUp,
 
   // 短按：intro=开始；capturing=拍照(拍照模式)/停止录像(录像中)；result=返回主页
   handleTap() {

@@ -45,17 +45,16 @@
 
 <script setup>
 import wx from 'wx';
-import { routeKeyEvent, safeBack } from '../../utils/gesture.js';
-import { gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
+import { safeBack } from '../../utils/gesture.js';
+import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
 import { acquireRecorderManager, probeRecordingApis } from '../../utils/recorder.js';
-import { extractFeatures, createTemplate, identifySpeaker, combineFrames, generateWaveform } from '../../utils/voiceprint-engine.js';
+import { extractFeatures, createTemplate, identifySpeaker, combineFrames, generateWaveform, MIN_AUDIO_BYTES, MIN_ENERGY } from '../../utils/voiceprint-engine.js';
 import { initAsr, startAsr, stopAsr, takeLatestText, asrMode, isAsrAvailable } from '../../utils/asr.js';
 import { speak, toggleVoicePrompt, isVoicePromptOn } from '../../utils/tts.js';
 
-// 录音有效性门槛（与注册页/验证页一致）：低于此值视为「没采到有效音频」，
-// 不建模、不入库、不参与识别，避免静音/太短坏样本污染共享的 voiceprint_db。
-const MIN_AUDIO_BYTES = 1600;
-const MIN_ENERGY = 1e-6;
+// 录音有效性门槛直接复用 voiceprint-engine 导出的共享常量（与注册页/验证页一致）：
+// 低于此值视为「没采到有效音频」，不建模、不入库、不参与识别，
+// 避免静音/太短坏样本污染共享的 voiceprint_db。
 
 export default {
   data: {
@@ -86,9 +85,7 @@ export default {
     unknownSpeakers: [],
     lastUnknownKey: null,
     strangerCount: 0,
-    subtitleSeq: 0,
-    // 調試：最近一次收到的按鍵碼（便於在無控制台的設備上確認返回手勢的 code）
-    debugKey: ''
+    subtitleSeq: 0
   },
 
   onLoad() {
@@ -594,18 +591,7 @@ export default {
     this.setData({ subtitles: [], statusText: '字幕已清空' });
   },
 
-  onKeyDown(event) {
-    this._lastFrameworkKey = Date.now();
-    // 調試：把整個事件的屬性名與原始碼顯示在螢幕 debugKey 上，便於確認返回手勢的 code
-    try {
-      const keys = event ? Object.keys(event).join(',') : 'null';
-      const raw = event ? (event.code || event.key || '?') : 'null';
-      const kc = event && typeof event.keyCode === 'number' ? (' kc=' + event.keyCode) : '';
-      this.setData({ debugKey: raw + kc + ' | keys:[' + keys + ']' });
-    } catch (e) {}
-    routeKeyEvent(this, event, 'down');
-  },
-
+  onKeyDown: gestureKeyDown,
   onKeyUp: gestureKeyUp,
 
   // 返回键：无论是否卡死，先停止聆听并退出本页，保证一定能退出来
@@ -702,10 +688,6 @@ export default {
 
     <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap">
       <text class="sim-tap-text">仿真操作：点此=短按（为陌生人起名）｜ 长按此区域=退出 ｜ 键盘双击空格=退出</text>
-    </view>
-
-    <view class="debug-key">
-      <text class="debug-key-text">最近按键：{{debugKey || '（暂无）'}}</text>
     </view>
   </view>
 </page>
@@ -986,16 +968,4 @@ export default {
   color: #7DFF90;
 }
 
-.debug-key {
-  margin-top: 8px;
-  padding: 6px 10px;
-  background-color: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-}
-
-.debug-key-text {
-  font-size: 13px;
-  color: #FFB000;
-  word-break: break-all;
-}
 </style>
