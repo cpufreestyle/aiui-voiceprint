@@ -525,7 +525,7 @@ export default {
     </view>
 
     <!-- 视觉设置面板：填入智谱 API Key -->
-    <view class="vision-setting" wx:if="{{showVisionSetting}}">
+    <view class="vision-setting" ink:if="{{showVisionSetting}}">
       <text class="vs-title">视觉模型设置（智谱 GLM-4V）</text>
       <text class="vs-line">当前密钥：{{apiKeyMasked}}</text>
       <input class="vs-input" type="text" password="{{true}}" placeholder="粘贴智谱 API Key" bindinput="onApiKeyInput" />
@@ -539,26 +539,26 @@ export default {
     <!-- 主字幕 -->
     <view class="caption-card">
       <text class="caption">{{caption}}</text>
-      <text class="hint" wx:if="{{hint}}">{{hint}}</text>
+      <text class="hint" ink:if="{{hint}}">{{hint}}</text>
       <text class="count-text">{{countText}}</text>
     </view>
 
     <!-- 相机取景（拍摄阶段）-->
-    <view class="camera-box" wx:if="{{wizardStep === 'capturing' && cameraReady}}">
+    <view class="camera-box" ink:if="{{wizardStep === 'capturing' && cameraReady}}">
       <camera class="camera" device-position="back" flash="off" binderror="onCameraError"></camera>
-      <view class="rec-dot" wx:if="{{isRecording}}"></view>
+      <view class="rec-dot" ink:if="{{isRecording}}"></view>
     </view>
-    <view class="camera-fallback" wx:if="{{wizardStep === 'capturing' && !cameraReady}}">
+    <view class="camera-fallback" ink:if="{{wizardStep === 'capturing' && !cameraReady}}">
       <text class="fallback-text">当前环境无相机，进入演示采集</text>
     </view>
 
     <!-- 采集操作区 -->
-    <view class="capture-ops" wx:if="{{wizardStep === 'capturing'}}">
-      <button class="op-btn shoot" bindtap="onTakePhoto" wx:if="{{captureMode === 'photo'}}">
+    <view class="capture-ops" ink:if="{{wizardStep === 'capturing'}}">
+      <button class="op-btn shoot" bindtap="onTakePhoto" ink:if="{{captureMode === 'photo'}}">
         <text class="op-main">拍照</text>
         <text class="op-sub">采集一张图片（≤5MB）</text>
       </button>
-      <button class="op-btn record {{recordBtnClass}}" bindtap="onToggleRecord" wx:if="{{captureMode === 'video'}}">
+      <button class="op-btn record {{recordBtnClass}}" bindtap="onToggleRecord" ink:if="{{captureMode === 'video'}}">
         <text class="op-main">{{recordBtnText}}</text>
         <text class="op-sub">采集一段视频（≤50MB）</text>
       </button>
@@ -575,24 +575,24 @@ export default {
     </view>
 
     <!-- 结果区操作 -->
-    <view class="result-ops" wx:if="{{wizardStep === 'result'}}">
+    <view class="result-ops" ink:if="{{wizardStep === 'result'}}">
       <button class="op-btn again" bindtap="resetAll"><text class="op-main">再拍一组</text></button>
       <button class="op-btn home" bindtap="goBackHome"><text class="op-main">返回主页</text></button>
     </view>
 
     <!-- 采集/解说列表 -->
-    <scroll-view class="item-list" scroll-y="true" wx:if="{{items.length > 0}}">
-      <view class="item-row" wx:for="{{items}}" wx:key="id">
+    <scroll-view class="item-list" scroll-y="true" ink:if="{{items.length > 0}}">
+      <view class="item-row" ink:for="{{items}}" ink:key="id">
         <view class="item-head">
           <text class="item-kind">{{item.kindText}}</text>
           <text class="item-size">{{item.sizeText}}</text>
         </view>
-        <image class="item-thumb" src="{{item.previewSrc}}" mode="aspectFill" wx:if="{{item.previewSrc}}"></image>
+        <image class="item-thumb" src="{{item.previewSrc}}" mode="aspectFill" ink:if="{{item.previewSrc}}"></image>
         <text class="item-desc {{item.descClass}}">{{item.descText}}</text>
       </view>
     </scroll-view>
 
-    <view class="empty-tip" wx:if="{{wizardStep === 'intro'}}">
+    <view class="empty-tip" ink:if="{{wizardStep === 'intro'}}">
       <text class="empty-text">拍照或录像后，我会用大模型识别画面并读给你听</text>
     </view>
 

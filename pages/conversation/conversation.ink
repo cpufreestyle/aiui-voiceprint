@@ -640,7 +640,7 @@ export default {
       </view>
     </view>
     <text class="instruction">听障交流辅助 - 说话人自动标注</text>
-    <text class="asr-notice" wx:if="{{showAsrNotice}}">说话人识别为真实声纹 ｜ 文字由 Rokid 语音识别（ASR）提供，仿真环境显示演示文本</text>
+    <text class="asr-notice" ink:if="{{showAsrNotice}}">说话人识别为真实声纹 ｜ 文字由 Rokid 语音识别（ASR）提供，仿真环境显示演示文本</text>
 
     <view class="status-bar {{statusBarClass}}">
       <text class="status-dot"></text>
@@ -650,7 +650,7 @@ export default {
     <view class="settings-toggle" bindtap="toggleSettings">
       <text>设置（时长 {{recDuration/1000}}s ｜ 语言 {{asrLang}}）</text>
     </view>
-    <view class="settings-panel" wx:if="{{showSettings}}">
+    <view class="settings-panel" ink:if="{{showSettings}}">
       <view class="settings-item" bindtap="cycleDuration">
         <text class="settings-label">录音时长</text>
         <text class="settings-value">{{recDuration/1000}} 秒（点击切换）</text>
@@ -666,18 +666,18 @@ export default {
     </view>
 
     <view class="waveform-display">
-      <view wx:for="{{waveformData}}" wx:key="index" wx:for-item="item">
+      <view ink:for="{{waveformData}}" ink:key="index" ink:for-item="item">
         <view class="waveform-bar" style="height: {{item * 100}}%;"></view>
       </view>
     </view>
 
     <scroll-view class="subtitle-area" scroll-y="true">
-      <view class="subtitle-line" wx:for="{{subtitles}}" wx:key="id">
-        <text class="speaker known" wx:if="{{item.isKnown}}">{{item.speaker}}：</text>
-        <text class="speaker unknown" wx:else>{{item.speaker}}：</text>
+      <view class="subtitle-line" ink:for="{{subtitles}}" ink:key="id">
+        <text class="speaker known" ink:if="{{item.isKnown}}">{{item.speaker}}：</text>
+        <text class="speaker unknown" ink:else>{{item.speaker}}：</text>
         <text class="subtitle-text">{{item.text}}</text>
       </view>
-      <view class="empty-sub" wx:if="{{subtitles.length === 0}}">
+      <view class="empty-sub" ink:if="{{subtitles.length === 0}}">
         <text>开始聆听后，对话字幕会显示在这里</text>
       </view>
     </scroll-view>

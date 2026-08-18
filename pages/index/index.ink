@@ -294,7 +294,7 @@ export default {
         <text class="status-label">已注册用户</text>
         <text class="status-value">{{userCount}}</text>
       </view>
-      <view class="status-row" wx:if="{{userCount > 0}}">
+      <view class="status-row" ink:if="{{userCount > 0}}">
         <text class="status-label">当前身份</text>
         <text class="status-value active-name">{{activeName}}</text>
       </view>
@@ -303,24 +303,24 @@ export default {
     <view class="action-row">
       <view
         class="menu-item {{item.selectedClass}}"
-        wx:for="{{menuItems}}"
-        wx:key="key"
+        ink:for="{{menuItems}}"
+        ink:key="key"
         bindtap="enterSelected">
         <text class="menu-text">{{item.label}}</text>
       </view>
     </view>
 
-    <view class="view-toggle" wx:if="{{userCount > 0}}">
+    <view class="view-toggle" ink:if="{{userCount > 0}}">
       <button class="btn-toggle" bindtap="toggleViewMode">
         <text>{{toggleText}}</text>
       </button>
     </view>
 
-    <view class="users-section" wx:if="{{userCount > 0}}">
+    <view class="users-section" ink:if="{{userCount > 0}}">
       <text class="section-title">已注册声纹（点击切换当前身份）</text>
       
-      <scroll-view class="user-list" scroll-y="true" wx:if="{{viewMode === 'list'}}">
-        <view class="user-card {{item.activeClass}}" wx:for="{{registeredUsers}}" wx:key="id">
+      <scroll-view class="user-list" scroll-y="true" ink:if="{{viewMode === 'list'}}">
+        <view class="user-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id">
           <view class="user-info" bindtap="switchActiveUser" data-id="{{item.id}}">
             <text class="user-name">{{item.name}}</text>
             <text class="user-time">{{item.enrolledAt}}</text>
@@ -336,21 +336,21 @@ export default {
         </view>
       </scroll-view>
 
-      <view class="user-grid" wx:if="{{viewMode === 'grid'}}">
-        <view class="grid-card {{item.activeClass}}" wx:for="{{registeredUsers}}" wx:key="id" bindtap="switchActiveUser" data-id="{{item.id}}">
-          <text class="grid-tag" wx:if="{{item.isActive}}">当前</text>
+      <view class="user-grid" ink:if="{{viewMode === 'grid'}}">
+        <view class="grid-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id" bindtap="switchActiveUser" data-id="{{item.id}}">
+          <text class="grid-tag" ink:if="{{item.isActive}}">当前</text>
           <text class="grid-name">{{item.name}}</text>
           <text class="grid-time">{{item.enrolledAt}}</text>
         </view>
       </view>
     </view>
 
-    <view class="empty-state" wx:if="{{userCount === 0}}">
+    <view class="empty-state" ink:if="{{userCount === 0}}">
       <text class="empty-text">暂无声纹记录</text>
       <text class="empty-hint">点击"录入声纹"开始</text>
     </view>
 
-    <view class="footer" wx:if="{{userCount > 0}}">
+    <view class="footer" ink:if="{{userCount > 0}}">
       <button class="btn-clear" bindtap="clearAllUsers">
         <text>清空全部</text>
       </button>

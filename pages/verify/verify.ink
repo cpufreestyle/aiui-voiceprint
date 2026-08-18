@@ -251,7 +251,7 @@ export default {
     <view class="waveform-container">
       <text class="waveform-label">实时波形：</text>
       <view class="waveform-display">
-        <view wx:for="{{waveformData}}" wx:key="index" wx:for-item="item">
+        <view ink:for="{{waveformData}}" ink:key="index" ink:for-item="item">
           <view class="waveform-bar" style="height: {{item * 100}}%;"></view>
         </view>
       </view>
@@ -259,10 +259,10 @@ export default {
     
     <view class="{{statusBoxClass}}">
       <text class="status-text">{{status}}</text>
-      <text class="confidence-text" wx:if="{{result}}">置信度: {{result.confidence}}</text>
+      <text class="confidence-text" ink:if="{{result}}">置信度: {{result.confidence}}</text>
     </view>
     
-    <view class="result-details" wx:if="{{result}}">
+    <view class="result-details" ink:if="{{result}}">
       <text class="result-title">验证详情</text>
       <text class="result-item">时间: {{result.timestamp}}</text>
       <text class="result-item">结果: {{result.message}}</text>
@@ -275,7 +275,7 @@ export default {
         <text class="btn-sub-text">录制3秒钟</text>
       </button>
       
-      <button bindtap="tryAgain" class="retry-btn" wx:if="{{result}}">
+      <button bindtap="tryAgain" class="retry-btn" ink:if="{{result}}">
         <text class="btn-main-text">重新验证</text>
       </button>
       

@@ -666,22 +666,22 @@ export default {
     <view class="wizard-card">
       <text class="wizard-caption">{{wizardCaption}}</text>
 
-      <view class="countdown-box" wx:if="{{countdownNum}}">
+      <view class="countdown-box" ink:if="{{countdownNum}}">
         <text class="countdown-num">{{countdownNum}}</text>
       </view>
 
-      <view class="prompt-box" wx:if="{{wizardStep === 'prompt' || wizardStep === 'recording'}}">
+      <view class="prompt-box" ink:if="{{wizardStep === 'prompt' || wizardStep === 'recording'}}">
         <text class="prompt-label">请朗读</text>
         <text class="prompt-text">{{promptText}}</text>
       </view>
 
-      <view class="waveform-display" wx:if="{{wizardStep === 'recording'}}">
-        <view wx:for="{{waveformData}}" wx:key="index" wx:for-item="item">
+      <view class="waveform-display" ink:if="{{wizardStep === 'recording'}}">
+        <view ink:for="{{waveformData}}" ink:key="index" ink:for-item="item">
           <view class="waveform-bar" style="height: {{item * 100}}%;"></view>
         </view>
       </view>
 
-      <text class="wizard-hint" wx:if="{{wizardHint}}">{{wizardHint}}</text>
+      <text class="wizard-hint" ink:if="{{wizardHint}}">{{wizardHint}}</text>
       <text class="wizard-index">{{sentenceIndexText}}</text>
 
       <view class="progress-indicator">
@@ -696,7 +696,7 @@ export default {
       <text>{{manualToggleText}}</text>
     </button>
 
-    <view class="manual-panel" wx:if="{{showManual}}">
+    <view class="manual-panel" ink:if="{{showManual}}">
       <view class="status-box {{recordingClass}}">
         <text class="status-text">{{status}}</text>
       </view>
