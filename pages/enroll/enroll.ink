@@ -741,7 +741,7 @@ export default {
 .title {
   font-size: 26px;
   font-weight: bold;
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
   margin-bottom: 10px;
 }
 
@@ -749,7 +749,7 @@ export default {
 .wizard-card {
   width: 100%;
   background-color: #0d1a0d;
-  border: 3px solid #40FF5E;
+  border: 3px solid var(--color-primary, #40FF5E);
   border-radius: 14px;
   padding: 18px;
   margin-bottom: 12px;
@@ -786,7 +786,7 @@ export default {
 .prompt-box {
   width: 100%;
   background-color: #001400;
-  border: 2px dashed #40FF5E;
+  border: 2px dashed var(--color-primary, #40FF5E);
   border-radius: 12px;
   padding: 14px;
   margin: 10px 0;
@@ -796,7 +796,7 @@ export default {
 
 .prompt-label {
   font-size: 15px;
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
   opacity: 0.7;
   display: block;
   margin-bottom: 6px;
@@ -823,7 +823,7 @@ export default {
 
 .waveform-bar {
   flex: 1;
-  background-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
   border-radius: 2px;
   min-height: 4px;
   transition: height 0.1s ease;
@@ -859,8 +859,8 @@ export default {
 }
 
 .progress-dot.completed {
-  background-color: #40FF5E;
-  border-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
+  border-color: var(--color-primary, #40FF5E);
 }
 
 /* ===== 手动模式 ===== */
@@ -868,7 +868,7 @@ export default {
   width: 100%;
   padding: 10px;
   background-color: transparent;
-  border: 1px solid rgba(64, 255, 94, 0.4);
+  border: 1px solid var(--color-primary-40, rgba(64, 255, 94, 0.4));
   border-radius: 8px;
   margin-bottom: 8px;
 }
@@ -886,7 +886,7 @@ export default {
 .status-box {
   width: 100%;
   background-color: #1a1a1a;
-  border: 2px solid #40FF5E;
+  border: 2px solid var(--color-primary, #40FF5E);
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 12px;
@@ -938,10 +938,10 @@ button[disabled] {
   opacity: 0.4;
 }
 
-.record-btn { background-color: #40FF5E; border-color: #40FF5E; }
+.record-btn { background-color: var(--color-primary, #40FF5E); border-color: var(--color-primary, #40FF5E); }
 .stop-btn { background-color: #FF4040; border-color: #FF4040; }
 .save-btn { background-color: #4090FF; border-color: #4090FF; }
-.finish-btn { background-color: #40FF5E; border-color: #40FF5E; }
+.finish-btn { background-color: var(--color-primary, #40FF5E); border-color: var(--color-primary, #40FF5E); }
 
 .btn-main-text {
   font-size: 20px;
@@ -972,7 +972,7 @@ button[disabled] {
   width: 100%;
   padding: 14px;
   background-color: rgba(64, 255, 94, 0.12);
-  border: 2px dashed #40FF5E;
+  border: 2px dashed var(--color-primary, #40FF5E);
   border-radius: 12px;
   text-align: center;
   box-sizing: border-box;
@@ -986,6 +986,6 @@ button[disabled] {
   font-size: 15px;
   font-weight: bold;
   color: #7DFF90;
-  text-shadow: 0 0 5px rgba(64, 255, 94, 0.6);
+  text-shadow: 0 0 5px var(--color-primary-60, rgba(64, 255, 94, 0.6));
 }
 </style>

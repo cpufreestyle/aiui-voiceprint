@@ -303,7 +303,7 @@ export default {
 .title {
   font-size: 28px;
   font-weight: bold;
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
   margin-bottom: 8px;
 }
 
@@ -351,7 +351,7 @@ export default {
 
 .waveform-bar {
   flex: 1;
-  background-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
   border-radius: 2px;
   min-height: 4px;
   transition: height 0.1s ease;
@@ -360,7 +360,7 @@ export default {
 .status-box {
   width: 100%;
   background-color: #1a1a1a;
-  border: 3px solid #40FF5E;
+  border: 3px solid var(--color-primary, #40FF5E);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
@@ -375,7 +375,7 @@ export default {
 
 .status-box.success {
   background-color: #1a2a1a;
-  border-color: #40FF5E;
+  border-color: var(--color-primary, #40FF5E);
 }
 
 .status-box.failed {
@@ -410,7 +410,7 @@ export default {
 }
 
 .status-box.success .status-text {
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
 }
 
 .status-box.failed .status-text {
@@ -464,8 +464,8 @@ button[disabled] {
 }
 
 .verify-btn {
-  background-color: #40FF5E;
-  border-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
+  border-color: var(--color-primary, #40FF5E);
 }
 
 .retry-btn {
@@ -499,7 +499,7 @@ button[disabled] {
   width: 100%;
   padding: 14px;
   background-color: rgba(64, 255, 94, 0.12);
-  border: 2px dashed #40FF5E;
+  border: 2px dashed var(--color-primary, #40FF5E);
   border-radius: 12px;
   text-align: center;
   margin-top: 8px;
@@ -514,6 +514,6 @@ button[disabled] {
   font-size: 16px;
   font-weight: bold;
   color: #7DFF90;
-  text-shadow: 0 0 5px rgba(64, 255, 94, 0.6);
+  text-shadow: 0 0 5px var(--color-primary-60, rgba(64, 255, 94, 0.6));
 }
 </style>

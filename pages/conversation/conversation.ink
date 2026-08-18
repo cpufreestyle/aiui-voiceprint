@@ -705,7 +705,7 @@ export default {
 .title {
   font-size: 28px;
   font-weight: bold;
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
   margin-bottom: 4px;
 }
 
@@ -721,7 +721,7 @@ export default {
   flex: 0 0 auto;
   padding: 6px 14px;
   background-color: rgba(64, 255, 94, 0.15);
-  border: 1px solid #40FF5E;
+  border: 1px solid var(--color-primary, #40FF5E);
   border-radius: 16px;
 }
 
@@ -732,7 +732,7 @@ export default {
 .back-btn-text {
   font-size: 14px;
   font-weight: bold;
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
 }
 
 .mode-badge {
@@ -745,8 +745,8 @@ export default {
 
 .mode-badge.real {
   color: #000000;
-  background-color: #40FF5E;
-  border-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
+  border-color: var(--color-primary, #40FF5E);
 }
 
 .mode-badge.demo {
@@ -795,7 +795,7 @@ export default {
 
 .settings-label {
   font-size: 14px;
-  color: #40FF5E;
+  color: var(--color-primary, #40FF5E);
   font-weight: bold;
 }
 
@@ -837,7 +837,7 @@ export default {
 }
 
 .status-bar.listening {
-  border-color: #40FF5E;
+  border-color: var(--color-primary, #40FF5E);
 }
 
 .status-dot {
@@ -848,7 +848,7 @@ export default {
 }
 
 .status-bar.listening .status-dot {
-  background-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
   animation: blink 1s infinite;
 }
 
@@ -880,7 +880,7 @@ export default {
 
 .waveform-bar {
   flex: 1;
-  background-color: #40FF5E;
+  background-color: var(--color-primary, #40FF5E);
   border-radius: 2px;
   min-height: 3px;
 }
@@ -913,7 +913,7 @@ export default {
 
 .speaker.known {
   color: #7DFF90;
-  text-shadow: 0 0 5px rgba(64, 255, 94, 0.6);
+  text-shadow: 0 0 5px var(--color-primary-60, rgba(64, 255, 94, 0.6));
 }
 
 .speaker.unknown {
@@ -951,7 +951,7 @@ export default {
   width: 100%;
   padding: 14px;
   background-color: rgba(64, 255, 94, 0.12);
-  border: 2px dashed #40FF5E;
+  border: 2px dashed var(--color-primary, #40FF5E);
   border-radius: 12px;
   text-align: center;
   margin-top: 10px;

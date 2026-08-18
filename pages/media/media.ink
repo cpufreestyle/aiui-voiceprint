@@ -627,13 +627,13 @@ export default {
 .back-btn {
   padding: 6px 12px;
   background-color: rgba(64, 255, 94, 0.15);
-  border: 1px solid #40FF5E;
+  border: 1px solid var(--color-primary, #40FF5E);
   border-radius: 16px;
 }
 .back-btn:active { background-color: rgba(64, 255, 94, 0.35); }
-.back-btn-text { font-size: 14px; font-weight: bold; color: #40FF5E; }
+.back-btn-text { font-size: 14px; font-weight: bold; color: var(--color-primary, #40FF5E); }
 
-.title { font-size: 24px; font-weight: bold; color: #40FF5E; }
+.title { font-size: 24px; font-weight: bold; color: var(--color-primary, #40FF5E); }
 
 .mode-badge {
   font-size: 12px;
@@ -642,12 +642,12 @@ export default {
   border-radius: 12px;
   border: 1px solid;
 }
-.mode-badge.live { color: #000000; background-color: #40FF5E; border-color: #40FF5E; }
+.mode-badge.live { color: #000000; background-color: var(--color-primary, #40FF5E); border-color: var(--color-primary, #40FF5E); }
 .mode-badge.demo { color: #FFB000; background-color: rgba(255, 176, 0, 0.1); border-color: #FFB000; }
 
 .vision-setting {
   background-color: #0d1a0d;
-  border: 2px solid #40FF5E;
+  border: 2px solid var(--color-primary, #40FF5E);
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 10px;
@@ -659,14 +659,14 @@ export default {
 .vs-line { font-size: 13px; color: #CFFFD8; }
 .vs-input {
   background-color: #001400;
-  border: 1px solid #40FF5E;
+  border: 1px solid var(--color-primary, #40FF5E);
   border-radius: 8px;
   padding: 10px;
   color: #FFFFFF;
   font-size: 15px;
 }
 .vs-btns { display: flex; flex-direction: row; gap: 8px; }
-.vs-save { flex: 1; background-color: #40FF5E; border: none; border-radius: 8px; padding: 10px; }
+.vs-save { flex: 1; background-color: var(--color-primary, #40FF5E); border: none; border-radius: 8px; padding: 10px; }
 .vs-save text { color: #000000; font-weight: bold; font-size: 15px; }
 .vs-clear { flex: 0 0 auto; background-color: transparent; border: 1px solid #FF4040; border-radius: 8px; padding: 10px 16px; }
 .vs-clear text { color: #FF4040; font-size: 14px; }
@@ -674,7 +674,7 @@ export default {
 
 .caption-card {
   background-color: #0d1a0d;
-  border: 2px solid #40FF5E;
+  border: 2px solid var(--color-primary, #40FF5E);
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 10px;
@@ -698,7 +698,7 @@ export default {
   position: relative;
   width: 100%;
   height: 160px;
-  border: 2px solid #40FF5E;
+  border: 2px solid var(--color-primary, #40FF5E);
   border-radius: 12px;
   overflow: hidden;
   margin-bottom: 10px;
@@ -738,7 +738,7 @@ export default {
 .op-btn {
   padding: 12px;
   border-radius: 12px;
-  border: 3px solid #40FF5E;
+  border: 3px solid var(--color-primary, #40FF5E);
   background-color: transparent;
   display: flex;
   flex-direction: column;
@@ -748,12 +748,12 @@ export default {
 .op-main { font-size: 19px; font-weight: bold; color: #7DFF90; }
 .op-sub { font-size: 12px; color: rgba(207, 255, 216, 0.8); margin-top: 2px; }
 
-.op-btn.shoot { background-color: #40FF5E; border-color: #40FF5E; }
+.op-btn.shoot { background-color: var(--color-primary, #40FF5E); border-color: var(--color-primary, #40FF5E); }
 .op-btn.shoot .op-main, .op-btn.shoot .op-sub { color: #000000; }
 .op-btn.record { border-color: #FF4040; }
 .op-btn.record .op-main { color: #FF6060; }
 .op-btn.record.recording { background-color: #2a1a1a; animation: blink 1s infinite; }
-.op-btn.describe { background-color: #40FF5E; border-color: #40FF5E; }
+.op-btn.describe { background-color: var(--color-primary, #40FF5E); border-color: var(--color-primary, #40FF5E); }
 .op-btn.describe .op-main, .op-btn.describe .op-sub { color: #000000; }
 .op-btn.describe[disabled] { background-color: transparent; }
 .op-btn.describe[disabled] .op-main, .op-btn.describe[disabled] .op-sub { color: #7DFF90; }
@@ -781,7 +781,7 @@ export default {
   align-items: center;
   margin-bottom: 6px;
 }
-.item-kind { font-size: 15px; font-weight: bold; color: #40FF5E; }
+.item-kind { font-size: 15px; font-weight: bold; color: var(--color-primary, #40FF5E); }
 .item-size { font-size: 12px; color: rgba(255, 255, 255, 0.5); }
 .item-thumb {
   width: 100%;
@@ -810,7 +810,7 @@ export default {
   width: 100%;
   padding: 14px;
   background-color: rgba(64, 255, 94, 0.12);
-  border: 2px dashed #40FF5E;
+  border: 2px dashed var(--color-primary, #40FF5E);
   border-radius: 12px;
   text-align: center;
   box-sizing: border-box;
