@@ -4,8 +4,13 @@ Rokid AIUI 智能体应用，面向听障人群提供说话人识别与实时对
 
 ## Getting Started
 
-1. Install dependencies
-2. Start the development server (AIUI 仿真器 / 眼镜真机调试)
+本工程无第三方依赖，不需要安装依赖包。运行方式：
+
+1. 用 Rokid AIUI Studio 直接打开本项目目录（入口配置 `app.json`）；或
+2. 在 Rokid AIUI Studio 中导入 `aiui-voiceprint.aix` 产物包；或
+3. Rokid 眼镜真机调试
+
+> `.aix` 是产物包，修改 `pages/`、`utils/` 后需重新打包，否则会缺失新增页面。
 
 ## Capabilities
 
