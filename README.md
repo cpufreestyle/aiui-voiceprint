@@ -17,9 +17,10 @@
 
 ## 功能特性
 
-- **声纹注册**：多样本录音录入说话人声纹
+- **声纹注册**：向导式录入 3 句样本，自动生成说话人声纹
 - **说话人验证**：基于声学特征匹配，确认当前说话人身份
-- **对话字幕**：实时转写对话内容，辅助听障用户阅读
+- **对话字幕**：实时转写对话内容，标注说话人，辅助听障用户阅读
+- **眼镜拍摄解说**：拍摄图片 / 录像后由视觉模型生成解说并语音播报
 - **AI 辅助语音分析**：结合 AI 能力进行语音理解与呈现
 
 ## 交互规范（全应用统一）
@@ -36,6 +37,7 @@
 - network（网络）
 - audio（音频）
 - storage（存储）
+- camera（相机）
 
 祝您使用愉快！
 
@@ -56,8 +58,10 @@ mindmap
       录入声纹
       验证身份
       对话字幕
+      拍摄解说
       手势提示
     注册 enroll
+      向导式引导
       录制样本 x3
       实时波形
       进度指示
@@ -65,17 +69,19 @@ mindmap
       录音 3 秒
       实时验证
       结果显示
-    结果 result
-      成功 ✓
-      失败 ✗
-      重试
     对话字幕 conversation
       实时聆听
       字幕转写
       停止退出
+    拍摄解说 media
+      拍照 / 录像
+      视觉解说
+      语音播报
     工具 utils
       voiceprint-engine
       gesture
+      page-shell
+      recording-session
 ```
 
 ### 页面间导航（左右滑动流向，LR 布局）
@@ -85,11 +91,10 @@ flowchart LR
   Home((主页)) -->|右滑| Enroll[注册]
   Home -->|左滑| Verify[验证]
   Home -->|下滑| Conversation[对话字幕]
+  Home -->|上滑| Media[拍摄解说]
   Enroll -->|右滑| Home
   Verify -->|右滑| Home
-  Verify -->|得出结果| Result[结果]
-  Result -->|右滑| Home
-  Result -.->|左滑·失败可| Verify
+  Media -->|双击退出| Home
   Enroll -.->|左滑| Verify
   Verify -.->|左滑| Enroll
   Conversation -->|双击退出| Home

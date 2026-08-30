@@ -12,6 +12,7 @@ Rokid AIUI 智能体应用，面向听障人群提供说话人识别与实时对
 - Voiceprint enrollment with multi-sample recording（声纹注册）
 - Speaker verification using acoustic feature matching（说话人验证）
 - Conversation subtitles / real-time transcription（对话字幕）
+- Glasses capture narration / vision description（眼镜拍摄解说）
 - AI-assisted voice analysis（AI 辅助语音分析）
 
 ## Permissions
@@ -20,6 +21,7 @@ Rokid AIUI 智能体应用，面向听障人群提供说话人识别与实时对
 - network
 - audio
 - storage
+- camera
 
 ## Interaction (全应用统一)
 
