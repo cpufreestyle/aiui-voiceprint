@@ -345,9 +345,25 @@ export default {
       </view>
     </view>
 
-    <view class="empty-state" ink:if="{{userCount === 0}}">
-      <text class="empty-text">暂无声纹记录</text>
-      <text class="empty-hint">点击"录入声纹"开始</text>
+    <view class="onboarding" ink:if="{{userCount === 0}}">
+      <text class="onb-title">首次使用引导</text>
+
+      <view class="onb-step">
+        <text class="onb-num">1</text>
+        <text class="onb-text">录入声纹：进入后按提示朗读，录满 3 句以上即可完成注册</text>
+      </view>
+
+      <view class="onb-step">
+        <text class="onb-num">2</text>
+        <text class="onb-text">验证身份：说一句话，系统判断当前说话的是谁</text>
+      </view>
+
+      <view class="onb-step">
+        <text class="onb-num">3</text>
+        <text class="onb-text">对话字幕：实时显示对方说的话并标出说话人；陌生人可短按起名</text>
+      </view>
+
+      <text class="onb-hint">操作：滑动选功能 ｜ 短按进入 ｜ 双击退出</text>
     </view>
 
     <view class="footer" ink:if="{{userCount > 0}}">
@@ -624,6 +640,57 @@ export default {
 .grid-time {
   font-size: 10px;
   color: var(--color-text-secondary, rgba(64, 255, 94, 0.4));
+}
+
+.onboarding {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background-color: var(--color-surface, rgba(64, 255, 94, 0.05));
+  border: 2px solid var(--color-primary-40, rgba(64, 255, 94, 0.4));
+  border-radius: var(--radius-md, 12px);
+}
+
+.onb-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--color-primary, #40FF5E);
+  margin-bottom: 2px;
+}
+
+.onb-step {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.onb-num {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #000000;
+  background-color: var(--color-primary, #40FF5E);
+  border-radius: 50%;
+  text-align: center;
+  line-height: 18px;
+}
+
+.onb-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--color-text-primary, #FFFFFF);
+  line-height: 1.5;
+}
+
+.onb-hint {
+  font-size: 11px;
+  color: var(--color-text-secondary, rgba(64, 255, 94, 0.6));
+  text-align: center;
+  margin-top: 4px;
 }
 
 .empty-state {
