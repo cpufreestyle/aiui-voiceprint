@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, initial-scale=1">
+<title>听障助手 · 产品宣传视频</title>
+<style>
+  :root{
+    --bg0:#070b18; --bg1:#0d1530; --bg2:#111a3a;
+    --cyan:#22d3ee; --teal:#2dd4bf; --coral:#fb7185; --violet:#a78bfa;
+    --ink:#eaf2ff; --muted:#9fb0d0; --line:rgba(255,255,255,.14);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:var(--bg0);overflow:hidden;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+    color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .stage{position:relative;width:1920px;height:1080px;overflow:hidden;
+    background:
+      radial-gradient(1200px 800px at 78% 18%, rgba(34,211,238,.18), transparent 60%),
+      radial-gradient(1000px 900px at 14% 88%, rgba(167,139,250,.16), transparent 60%),
+      radial-gradient(900px 700px at 50% 50%, rgba(251,113,133,.08), transparent 65%),
+      linear-gradient(160deg,var(--bg1),var(--bg0) 70%);}
+
+  /* decorative equalizer */
+  .eq{position:absolute;left:0;right:0;bottom:0;height:340px;display:flex;align-items:flex-end;
+    justify-content:center;gap:10px;opacity:.5;pointer-events:none;filter:blur(.2px);}
+  .eq i{flex:0 0 14px;height:40px;border-radius:8px 8px 0 0;
+    background:linear-gradient(180deg,var(--cyan),rgba(34,211,238,.05));
+    animation:eq 1.6s ease-in-out infinite;}
+  @keyframes eq{0%,100%{height:30px;opacity:.35}50%{height:220px;opacity:.85}}
+
+  /* grid glow */
+  .grid{position:absolute;inset:0;opacity:.10;pointer-events:none;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:80px 80px;mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 78%);}
+
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;opacity:0;padding:90px;}
+  .kicker{font-size:30px;letter-spacing:.5em;color:var(--cyan);font-weight:600;
+    text-transform:uppercase;margin-bottom:26px;opacity:.9}
+  .title{font-size:104px;font-weight:800;line-height:1.12;letter-spacing:.02em;
+    text-shadow:0 6px 40px rgba(0,0,0,.5)}
+  .title .b{background:linear-gradient(90deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:40px;color:var(--muted);margin-top:30px;line-height:1.5;max-width:1400px}
+  .hint{margin-top:30px;font-size:28px;color:var(--teal);opacity:.92}
+
+  .pill{display:inline-flex;align-items:center;gap:14px;margin-top:34px;
+    padding:16px 30px;border:1px solid var(--line);border-radius:999px;
+    background:rgba(255,255,255,.04);font-size:28px;color:var(--ink);backdrop-filter:blur(6px)}
+  .pill b{color:var(--cyan);font-weight:700}
+
+  .card{margin-top:46px;display:flex;gap:34px;align-items:center;
+    padding:34px 46px;border:1px solid var(--line);border-radius:28px;
+    background:rgba(255,255,255,.05);backdrop-filter:blur(8px);
+    box-shadow:0 30px 80px rgba(0,0,0,.45)}
+  .card img{width:430px;height:430px;object-fit:contain;border-radius:18px;
+    background:rgba(0,0,0,.25)}
+  .card .txt{text-align:left;max-width:720px}
+  .card .txt h3{font-size:46px;font-weight:800;margin-bottom:16px}
+  .card .txt p{font-size:30px;color:var(--muted);line-height:1.55}
+
+  .icon{width:300px;height:300px;object-fit:contain;
+    filter:drop-shadow(0 20px 60px rgba(34,211,238,.45))}
+  .ring{position:absolute;width:560px;height:560px;border-radius:50%;
+    border:2px solid rgba(34,211,238,.35);top:50%;left:50%;
+    transform:translate(-50%,-50%) scale(.6);animation:ring 3.4s ease-out infinite}
+  .ring.d{animation-delay:1.7s;border-color:rgba(167,139,250,.3)}
+  @keyframes ring{0%{opacity:0;transform:translate(-50%,-50%) scale(.55)}
+    30%{opacity:.9}100%{opacity:0;transform:translate(-50%,-50%) scale(1.15)}}
+
+  /* conversation subtitle mock */
+  .subtitles{margin-top:40px;width:1180px;display:flex;flex-direction:column;gap:18px}
+  .line{display:flex;align-items:center;gap:18px;justify-content:flex-start;
+    opacity:0;transform:translateY(14px);animation:rise .5s ease forwards}
+  .tag{font-size:30px;font-weight:800;padding:8px 20px;border-radius:14px;color:#06121f}
+  .tag.known{background:linear-gradient(90deg,var(--cyan),var(--teal))}
+  .tag.stranger{background:linear-gradient(90deg,var(--coral),#f59e0b)}
+  .line .msg{font-size:40px;color:var(--ink);background:rgba(255,255,255,.06);
+    padding:14px 26px;border-radius:16px;border:1px solid var(--line)}
+  @keyframes rise{to{opacity:1;transform:translateY(0)}}
+
+  .match{font-size:64px;font-weight:800;color:var(--teal);margin-top:18px}
+  .match small{font-size:30px;color:var(--muted);font-weight:500}
+
+  .credit{position:absolute;bottom:54px;font-size:24px;color:var(--muted);letter-spacing:.2em;opacity:.8}
+
+  /* narration caption (burned-in) */
+  .caption{position:absolute;left:50%;bottom:104px;transform:translateX(-50%);
+    width:1560px;text-align:center;font-size:34px;line-height:1.5;color:var(--ink);
+    background:linear-gradient(90deg,rgba(7,11,24,0),rgba(7,11,24,.6) 18%,rgba(7,11,24,.6) 82%,rgba(7,11,24,0));
+    padding:16px 30px;border-radius:16px;opacity:0;font-weight:600;
+    text-shadow:0 2px 14px rgba(0,0,0,.6)}
+  .caption b{color:var(--cyan)}
+  #c0{animation:ca0 45s linear forwards} #c1{animation:ca1 45s linear forwards}
+  #c2{animation:ca2 45s linear forwards} #c3{animation:ca3 45s linear forwards}
+  #c4{animation:ca4 45s linear forwards} #c5{animation:ca5 45s linear forwards}
+  #c6{animation:ca6 45s linear forwards}
+  @keyframes ca0{0%{opacity:0}2%{opacity:1}10%{opacity:1}13%{opacity:0}100%{opacity:0}}
+  @keyframes ca1{0%,11%{opacity:0}14%{opacity:1}21%{opacity:1}24%{opacity:0}100%{opacity:0}}
+  @keyframes ca2{0%,22%{opacity:0}25%{opacity:1}37%{opacity:1}39%{opacity:0}100%{opacity:0}}
+  @keyframes ca3{0%,38%{opacity:0}41%{opacity:1}61%{opacity:1}63%{opacity:0}100%{opacity:0}}
+  @keyframes ca4{0%,62%{opacity:0}65%{opacity:1}75%{opacity:1}77%{opacity:0}100%{opacity:0}}
+  @keyframes ca5{0%,76%{opacity:0}79%{opacity:1}88%{opacity:1}90%{opacity:0}100%{opacity:0}}
+  @keyframes ca6{0%,89%{opacity:0}92%{opacity:1}100%{opacity:1}}
+
+  /* progress */
+  .progress{position:absolute;left:0;bottom:0;height:8px;width:0;
+    background:linear-gradient(90deg,var(--cyan),var(--violet));
+    box-shadow:0 0 24px rgba(34,211,238,.7);animation:prog 45s linear forwards}
+  @keyframes prog{to{width:100%}}
+
+  /* scene timing (45s master) */
+  #s0{animation:sc0 45s linear forwards}
+  #s1{animation:sc1 45s linear forwards}
+  #s2{animation:sc2 45s linear forwards}
+  #s3{animation:sc3 45s linear forwards}
+  #s4{animation:sc4 45s linear forwards}
+  #s5{animation:sc5 45s linear forwards}
+  #s6{animation:sc6 45s linear forwards}
+  @keyframes sc0{0%{opacity:0}2%{opacity:1}11%{opacity:1}13%{opacity:0}100%{opacity:0}}
+  @keyframes sc1{0%,11%{opacity:0}14%{opacity:1}22%{opacity:1}24%{opacity:0}100%{opacity:0}}
+  @keyframes sc2{0%,22%{opacity:0}25%{opacity:1}36%{opacity:1}38%{opacity:0}100%{opacity:0}}
+  @keyframes sc3{0%,36%{opacity:0}39%{opacity:1}60%{opacity:1}62%{opacity:0}100%{opacity:0}}
+  @keyframes sc4{0%,60%{opacity:0}63%{opacity:1}74%{opacity:1}76%{opacity:0}100%{opacity:0}}
+  @keyframes sc5{0%,74%{opacity:0}77%{opacity:1}87%{opacity:1}89%{opacity:0}100%{opacity:0}}
+  @keyframes sc6{0%,87%{opacity:0}90%{opacity:1}100%{opacity:1}}
+
+  /* staggered subtitle line reveals inside s3 (window ~17.5s–27s) */
+  #s3 .line:nth-child(1){animation-delay:18s}
+  #s3 .line:nth-child(2){animation-delay:20.2s}
+  #s3 .line:nth-child(3){animation-delay:22.6s}
+  #s3 .line:nth-child(4){animation-delay:24.8s}
+
+  .float{animation:float 5s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="grid"></div>
+  <div class="eq" id="eq"></div>
+
+  <!-- S0 Hook -->
+  <section class="scene" id="s0">
+    <div class="kicker">痛点</div>
+    <div class="title">面对面交流时，<br>你分得清 <span class="b">谁在说</span> 吗？</div>
+    <div class="sub">听不清声音的人，<br>更难感知「谁在说话、说了什么」。</div>
+  </section>
+
+  <!-- S1 Product reveal -->
+  <section class="scene" id="s1">
+    <div class="ring"></div><div class="ring d"></div>
+    <img class="icon float" src="assets/icon-a-bubble-waveform-512.png" alt="听障助手">
+    <div class="title">听障助手</div>
+    <div class="sub">一款运行在 <b style="color:var(--cyan)">Rokid 智能眼镜</b> 上的对话辅助智能体</div>
+  </section>
+
+  <!-- S2 Enroll -->
+  <section class="scene" id="s2">
+    <div class="kicker">功能一</div>
+    <div class="title">录入声纹</div>
+    <div class="card">
+      <img src="assets/preview-1-overview.png" alt="录入声纹预览">
+      <div class="txt">
+        <h3>把常接触的人，记下来</h3>
+        <p>按提示朗读，录满 <b style="color:var(--cyan)">3 句以上</b> 建立声纹。<br>建议为家人、同事各录一次。</p>
+      </div>
+    </div>
+    <div class="pill">首次必做 · 之后才能 <b>识别他们</b></div>
+  </section>
+
+  <!-- S3 Conversation (core) -->
+  <section class="scene" id="s3">
+    <div class="kicker">核心功能</div>
+    <div class="title">对话字幕</div>
+    <div class="subtitles">
+      <div class="line"><span class="tag known">妈妈</span><span class="msg">今天天气真好，我们去散步吧</span></div>
+      <div class="line"><span class="tag known">爸爸</span><span class="msg">午饭想吃什么？</span></div>
+      <div class="line"><span class="tag stranger">陌生人2</span><span class="msg">您好，请问电梯在哪层？</span></div>
+      <div class="line"><span class="tag known">同事·小林</span><span class="msg">会议改到三点了</span></div>
+    </div>
+  </section>
+
+  <!-- S4 Verify -->
+  <section class="scene" id="s4">
+    <div class="kicker">功能二</div>
+    <div class="title">验证身份</div>
+    <div class="sub">说一句话，确认「现在说话的是谁」</div>
+    <div class="match">匹配：妈妈 <small>相似度 94%</small></div>
+    <div class="pill">需先完成 <b>录入声纹</b></div>
+  </section>
+
+  <!-- S5 Media -->
+  <section class="scene" id="s5">
+    <div class="kicker">功能三</div>
+    <div class="title">拍摄解说</div>
+    <div class="card">
+      <img src="assets/preview-2-gesture-guide.png" alt="拍摄解说预览">
+      <div class="txt">
+        <h3>拍下眼前，AI 帮你「看」</h3>
+        <p>拍摄画面，由 AI 生成解说并<b style="color:var(--cyan)">语音播报</b>。<br>看不清的事物，眼镜替你念出来。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- S6 CTA -->
+  <section class="scene" id="s6">
+    <div class="ring"></div><div class="ring d"></div>
+    <img class="icon float" src="assets/icon-a-bubble-waveform-512.png" alt="听障助手">
+    <div class="title">戴上眼镜，<br>重新 <span class="b">看见</span> 每一句对话</div>
+    <div class="sub">听障助手 · 基于 Rokid AIUI</div>
+  </section>
+
+  <div class="caption" id="c0">面对面交流时，你分得清谁在说话吗？听不清声音的人，更难感知谁在说话、说了什么。</div>
+  <div class="caption" id="c1">听障助手，一款运行在 <b>Rokid 智能眼镜</b> 上的对话辅助智能体。</div>
+  <div class="caption" id="c2">第一步，<b>录入声纹</b>。按提示朗读，录满三句以上，建立声纹。</div>
+  <div class="caption" id="c3">核心功能，<b>对话字幕</b>。实时把对方的话，变成带说话人姓名的字幕。</div>
+  <div class="caption" id="c4">想确认身份，用<b>验证身份</b>。说一句话，系统给出最匹配的人与相似度。</div>
+  <div class="caption" id="c5">看不清眼前事物，用<b>拍摄解说</b>。拍下画面，AI 生成解说并语音播报。</div>
+  <div class="caption" id="c6">戴上眼镜，重新看见每一句对话。听障助手，基于 Rokid AIUI。</div>
+
+  <div class="progress"></div>
+  <div class="credit">听障助手 · AIUI VOICEPRINT</div>
+</div>
+
+<script>
+  // build equalizer bars
+  (function(){
+    var eq=document.getElementById('eq');
+    var n=46;
+    for(var i=0;i<n;i++){
+      var b=document.createElement('i');
+      b.style.animationDelay=(i*0.06).toFixed(2)+'s';
+      b.style.opacity=(0.3+0.5*Math.abs(Math.sin(i))).toFixed(2);
+      eq.appendChild(b);
+    }
+  })();
+</script>
+</body>
+</html>

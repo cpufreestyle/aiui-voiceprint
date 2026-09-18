@@ -66,6 +66,7 @@ import wx from 'wx';
 import { installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
 import { gestureKeyDown, gestureKeyUp } from '../../utils/page-shell.js';
 import { getActiveUser, setActiveUser, reconcileActiveUser } from '../../utils/active-user.js';
+import { speak } from '../../utils/tts.js';
 
 export default {
   data: {
@@ -92,6 +93,7 @@ export default {
     this.loadVoiceprintDB();
     installKeyboardFallback(this);
     this.refreshMenuSelection();
+    this.speakWelcome();
   },
 
   onShow() {
@@ -103,6 +105,14 @@ export default {
     removeKeyboardFallback(this);
   },
 
+  speakWelcome() {
+    const db = wx.getStorageSync('voiceprint_db');
+    const count = (db && db.users) ? db.users.length : 0;
+    const text = count === 0
+      ? '欢迎使用听障助手。先选录入声纹，为家人或同事建立声纹；之后即可识别说话人、显示对话字幕。滑动选功能，短按进入。'
+      : '欢迎使用听障助手。已录入 ' + count + ' 位说话人。选择对话字幕即可开始交流。';
+    speak(text);
+  },
   onKeyDown: gestureKeyDown,
   onKeyUp: gestureKeyUp,
   // 镜腿短按：进入当前高亮选中的功能
@@ -266,6 +276,109 @@ export default {
     }
   },
 
+  // 重命名声纹：弹输入框改姓名，写回 voiceprint_db
+  renameUser(event) {
+    const that = this;
+    const userId = event.currentTarget.dataset.id;
+    const db = wx.getStorageSync('voiceprint_db');
+    if (!db || !db.users) return;
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    wx.showModal({
+      title: '重命名声纹',
+      editable: true,
+      placeholderText: user.name || '输入新姓名',
+      success(res) {
+        if (!res.confirm) return;
+        const name = (res.content || '').trim();
+        if (!name) {
+          wx.showToast({ title: '名字不能为空', icon: 'none', duration: 1500 });
+          return;
+        }
+        const db2 = wx.getStorageSync('voiceprint_db');
+        const u = db2 && db2.users ? db2.users.find((x) => x.id === userId) : null;
+        if (!u) return;
+        u.name = name;
+        wx.setStorageSync('voiceprint_db', db2);
+        that.loadVoiceprintDB();
+        wx.showToast({ title: '已重命名：' + name, icon: 'success', duration: 1500 });
+      }
+    });
+  },
+
+  // 导出声纹库：序列化为 JSON 复制到剪贴板，供换镜/多设备迁移
+  exportDb() {
+    const db = wx.getStorageSync('voiceprint_db');
+    if (!db || !db.users || db.users.length === 0) {
+      wx.showToast({ title: '声纹库为空，无可导出', icon: 'none', duration: 1800 });
+      return;
+    }
+    const payload = {
+      app: 'aiui-voiceprint',
+      version: 1,
+      exportedAt: Date.now(),
+      users: db.users
+    };
+    try {
+      wx.setClipboardData({
+        data: JSON.stringify(payload),
+        success() {
+          wx.showToast({ title: '已复制 ' + db.users.length + ' 条声纹到剪贴板', icon: 'success', duration: 2000 });
+        },
+        fail() {
+          wx.showToast({ title: '复制失败，请重试', icon: 'none', duration: 1800 });
+        }
+      });
+    } catch (e) {
+      wx.showToast({ title: '导出失败：' + e, icon: 'none', duration: 2000 });
+    }
+  },
+
+  // 导入声纹库：从剪贴板读取 JSON，校验后按 id 去重合并（同 id 覆盖为新数据）
+  importDb() {
+    const that = this;
+    wx.getClipboardData({
+      success(res) {
+        const raw = (res && res.data ? res.data : '').trim();
+        if (!raw) {
+          wx.showToast({ title: '剪贴板为空', icon: 'none', duration: 1500 });
+          return;
+        }
+        let payload = null;
+        try { payload = JSON.parse(raw); } catch (e) {
+          wx.showToast({ title: '内容不是有效 JSON，导入取消', icon: 'none', duration: 2000 });
+          return;
+        }
+        const users = payload && Array.isArray(payload.users) ? payload.users : null;
+        if (!users || users.length === 0 ||
+            !users.every((u) => u && u.id && u.name && u.template)) {
+          wx.showToast({ title: '格式不符：缺少 users/模板，导入取消', icon: 'none', duration: 2200 });
+          return;
+        }
+        wx.showModal({
+          title: '导入声纹库',
+          content: '将导入 ' + users.length + ' 条声纹（同名同 id 的会被覆盖）。确认导入？',
+          success(m) {
+            if (!m.confirm) return;
+            const db = wx.getStorageSync('voiceprint_db') || { users: [] };
+            if (!Array.isArray(db.users)) db.users = [];
+            const byId = {};
+            db.users.forEach((u) => { byId[u.id] = u; });
+            users.forEach((u) => { byId[u.id] = u; });
+            db.users = Object.keys(byId).map((k) => byId[k]);
+            wx.setStorageSync('voiceprint_db', db);
+            reconcileActiveUser();
+            that.loadVoiceprintDB();
+            wx.showToast({ title: '导入完成，共 ' + db.users.length + ' 条', icon: 'success', duration: 2000 });
+          }
+        });
+      },
+      fail() {
+        wx.showToast({ title: '读取剪贴板失败', icon: 'none', duration: 1500 });
+      }
+    });
+  },
+
   formatTime(timestamp) {
     if (!timestamp) return '未知';
     const date = new Date(timestamp);
@@ -329,6 +442,9 @@ export default {
             <button class="btn-switch {{item.activeClass}}" bindtap="switchActiveUser" data-id="{{item.id}}">
               <text>{{item.activeTag}}</text>
             </button>
+            <button class="btn-rename" bindtap="renameUser" data-id="{{item.id}}">
+              <text>改名</text>
+            </button>
             <button class="btn-delete" bindtap="deleteUser" data-id="{{item.id}}">
               <text>删除</text>
             </button>
@@ -350,25 +466,38 @@ export default {
 
       <view class="onb-step">
         <text class="onb-num">1</text>
-        <text class="onb-text">录入声纹：进入后按提示朗读，录满 3 句以上即可完成注册</text>
+        <text class="onb-text">录入声纹：进入「录入声纹」，按提示朗读 3 句以上，为一位家人或同事建档（建议每位都录一次）</text>
       </view>
 
       <view class="onb-step">
         <text class="onb-num">2</text>
-        <text class="onb-text">验证身份：说一句话，系统判断当前说话的是谁</text>
+        <text class="onb-text">验证身份：说一句话，系统判断当前说话的人是谁，并给出相似度</text>
       </view>
 
       <view class="onb-step">
         <text class="onb-num">3</text>
-        <text class="onb-text">对话字幕：实时显示对方说的话并标出说话人；陌生人可短按起名</text>
+        <text class="onb-text">对话字幕：实时把对方的话转为带「说话人姓名」的字幕；陌生人可现场起名</text>
       </view>
 
+      <text class="onb-cta">👉 现在就选中「录入声纹」，短按进入开始第一步</text>
       <text class="onb-hint">操作：滑动选功能 ｜ 短按进入 ｜ 双击退出</text>
     </view>
 
     <view class="footer" ink:if="{{userCount > 0}}">
+      <button class="btn-io" bindtap="exportDb">
+        <text>导出声纹库</text>
+      </button>
+      <button class="btn-io" bindtap="importDb">
+        <text>导入声纹库</text>
+      </button>
       <button class="btn-clear" bindtap="clearAllUsers">
         <text>清空全部</text>
+      </button>
+    </view>
+
+    <view class="footer" ink:if="{{userCount === 0}}">
+      <button class="btn-io" bindtap="importDb">
+        <text>从剪贴板导入声纹库</text>
       </button>
     </view>
 
@@ -596,6 +725,31 @@ export default {
   color: var(--border-color-danger, #FF4040);
 }
 
+.btn-rename {
+  padding: 6px 12px;
+  background-color: transparent;
+  border: var(--border-width-thin, 1px) solid var(--border-color-muted, rgba(64, 255, 94, 0.4));
+  border-radius: var(--radius-sm, 6px);
+}
+
+.btn-rename text {
+  font-size: 11px;
+  color: var(--color-primary, #40FF5E);
+}
+
+.btn-io {
+  padding: 8px 14px;
+  margin: 0 6px;
+  background-color: transparent;
+  border: var(--border-width-thin, 1px) solid var(--border-color-muted, rgba(64, 255, 94, 0.4));
+  border-radius: var(--radius-sm, 8px);
+}
+
+.btn-io text {
+  font-size: 12px;
+  color: var(--color-primary, #40FF5E);
+}
+
 .user-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -689,6 +843,17 @@ export default {
 .onb-hint {
   font-size: 11px;
   color: var(--color-text-secondary, rgba(64, 255, 94, 0.6));
+  text-align: center;
+  margin-top: 4px;
+}
+
+.onb-cta {
+  font-size: 12px;
+  font-weight: bold;
+  color: #000000;
+  background-color: var(--color-primary, #40FF5E);
+  border-radius: 8px;
+  padding: 6px 10px;
   text-align: center;
   margin-top: 4px;
 }

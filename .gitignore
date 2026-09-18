@@ -11,3 +11,10 @@ node_modules/
 
 # Local IDE / agent workspace data (not part of the app)
 .codebuddy/
+
+# 视频渲染重产物（中间件/成片不入库，保留 BRIEF/HTML/脚本等文本源）
+video/*.webm
+video/*.wav
+video/*.mp4
+video/*.jpg
+video/*.png

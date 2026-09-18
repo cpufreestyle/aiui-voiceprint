@@ -35,6 +35,24 @@
           "type": "array",
           "description": "实时波形数据数组",
           "items": { "type": "number" }
+        },
+        "historyMode": {
+          "type": "boolean",
+          "description": "是否处于字幕历史回看模式"
+        },
+        "historyEntries": {
+          "type": "array",
+          "description": "历史回看条目（倒序，最新在上）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "number", "description": "条目序号" },
+              "speaker": { "type": "string", "description": "说话人名称" },
+              "text": { "type": "string", "description": "识别到的文字" },
+              "isKnown": { "type": "boolean", "description": "是否为已录入/已起名的人" },
+              "timeText": { "type": "string", "description": "HH:MM 时间文本" }
+            }
+          }
         }
       },
       "required": ["isListening", "statusText", "showAsrNotice", "subtitles", "waveformData"]
@@ -85,7 +103,10 @@ export default {
     unknownSpeakers: [],
     lastUnknownKey: null,
     strangerCount: 0,
-    subtitleSeq: 0
+    subtitleSeq: 0,
+    // 历史回看模式：展示上次/历次对话持久化的字幕记录
+    historyMode: false,
+    historyEntries: []
   },
 
   onLoad() {
@@ -474,6 +495,15 @@ export default {
       statusText: isKnown ? ('已识别：' + speakerLabel) : ('未识别 - ' + speakerLabel + '（短按可起名）')
     });
 
+    // 持久化历史（跨会话可回看）：只存文本与标签，不存声纹特征
+    try {
+      let hist = wx.getStorageSync('conversation_history') || [];
+      if (!Array.isArray(hist)) hist = [];
+      hist.push({ key: newSub.key, speaker: speakerLabel, text: text, isKnown: isKnown, ts: Date.now() });
+      if (hist.length > 50) hist = hist.slice(hist.length - 50);
+      wx.setStorageSync('conversation_history', hist);
+    } catch (e) { console.log('历史持久化失败: ' + e); }
+
     // 振动反馈
     const app = getApp();
     if (app && app.globalData && app.globalData.vibrationEnabled) {
@@ -582,6 +612,17 @@ export default {
       lastUnknownKey: null,
       statusText: '已为「' + name + '」起名并入库'
     });
+
+    // 同步回改持久化历史中该陌生人的标签（与屏幕字幕保持一致）
+    try {
+      const hist = wx.getStorageSync('conversation_history');
+      if (Array.isArray(hist)) {
+        const hist2 = hist.map((h) => h.key === key
+          ? Object.assign({}, h, { speaker: name, isKnown: true })
+          : h);
+        wx.setStorageSync('conversation_history', hist2);
+      }
+    } catch (e) { console.log('历史回改失败: ' + e); }
     speak('已为' + name + '起名');
     wx.showToast({ title: '已保存：' + name, icon: 'success', duration: 1500 });
   },
@@ -589,6 +630,49 @@ export default {
   // 清空字幕
   clearSubtitles() {
     this.setData({ subtitles: [], statusText: '字幕已清空' });
+  },
+
+  // ===== 字幕历史回看 =====
+  // 打开历史回看：暂停聆听，从 storage 读取最近 50 条（倒序，最新在上）
+  openHistory() {
+    let hist = [];
+    try {
+      hist = wx.getStorageSync('conversation_history') || [];
+      if (!Array.isArray(hist)) hist = [];
+    } catch (e) { console.log('读取历史失败: ' + e); }
+    const entries = hist.slice().reverse().map((h, i) => ({
+      id: i,
+      speaker: h.speaker || '未知',
+      text: h.text || '',
+      isKnown: !!h.isKnown,
+      timeText: this.formatTs(h.ts)
+    }));
+    const wasListening = this.data.isListening;
+    if (wasListening) this.stopListening();
+    this.setData({ historyMode: true, historyEntries: entries });
+    this.setData({
+      statusText: entries.length ? ('历史回看 - 共 ' + entries.length + ' 条') : '暂无历史字幕'
+    });
+  },
+
+  closeHistory() {
+    this.setData({ historyMode: false, historyEntries: [] });
+    this.setData({ statusText: '已退出回看（右滑继续聆听）' });
+  },
+
+  clearHistory() {
+    try { wx.setStorageSync('conversation_history', []); } catch (e) {}
+    this.setData({ historyEntries: [], statusText: '历史字幕已清空' });
+    speak('历史已清空');
+  },
+
+  // 时间戳 → HH:MM
+  formatTs(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return hh + ':' + mm;
   },
 
   onKeyDown: gestureKeyDown,
@@ -607,8 +691,12 @@ export default {
     safeBack();
   },
 
-  // 短按：进入 - 给最近一位陌生人起名（现场起名）
+  // 短按：进入 - 给最近一位陌生人起名（现场起名）；历史回看模式下短按=退出回看
   handleTap() {
+    if (this.data.historyMode) {
+      this.closeHistory();
+      return;
+    }
     this.nameLastUnknown();
   },
 
@@ -618,7 +706,9 @@ export default {
   },
 
   // 滑动：左右选择功能（左/上 → 清空字幕；右/下 → 开始/暂停聆听）
+  // 历史回看模式下屏蔽手势，避免误清空/误暂停
   handleSwipe(direction) {
+    if (this.data.historyMode) return;
     if (direction === 'left' || direction === 'up') {
       this.clearSubtitles();
     } else if (direction === 'right' || direction === 'down') {
@@ -649,6 +739,27 @@ export default {
 
     <view class="settings-toggle" bindtap="toggleSettings">
       <text>设置（时长 {{recDuration/1000}}s ｜ 语言 {{asrLang}}）</text>
+    </view>
+    <view class="history-toggle" bindtap="openHistory">
+      <text>字幕回看（最近 50 条）</text>
+    </view>
+
+    <view class="history-panel" ink:if="{{historyMode}}">
+      <view class="history-head">
+        <text class="history-title">历史字幕（最新在上）</text>
+        <view class="history-actions">
+          <view class="history-btn" bindtap="clearHistory"><text>清空</text></view>
+          <view class="history-btn" bindtap="closeHistory"><text>关闭</text></view>
+        </view>
+      </view>
+      <scroll-view class="history-list" scroll-y="true">
+        <view class="history-item" ink:for="{{historyEntries}}" ink:key="id">
+          <text class="history-time">{{item.timeText}}</text>
+          <text class="history-speaker {{item.isKnown ? 'known' : 'unknown'}}">{{item.speaker}}</text>
+          <text class="history-text">{{item.text}}</text>
+        </view>
+        <text class="history-empty" ink:if="{{historyEntries.length === 0}}">还没有历史字幕，先开始聆听对话吧</text>
+      </scroll-view>
     </view>
     <view class="settings-panel" ink:if="{{showSettings}}">
       <view class="settings-item" bindtap="cycleDuration">
@@ -768,6 +879,109 @@ export default {
 .settings-toggle text {
   font-size: 15px;
   color: #E6E6E6;
+}
+
+/* ===== 字幕历史回看 ===== */
+.history-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  background-color: #1a1a1a;
+  border: 1px solid #333333;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.history-toggle text {
+  font-size: 15px;
+  color: #40FF5E;
+}
+
+.history-panel {
+  width: 100%;
+  background-color: #141414;
+  border: 1px solid #333333;
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.history-head {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.history-title {
+  font-size: 14px;
+  color: #E6E6E6;
+  font-weight: bold;
+}
+
+.history-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.history-btn {
+  padding: 4px 10px;
+  border: 1px solid #444444;
+  border-radius: 8px;
+}
+
+.history-btn text {
+  font-size: 12px;
+  color: #E6E6E6;
+}
+
+.history-list {
+  width: 100%;
+  max-height: 160px;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 2px;
+  border-bottom: 1px solid #222222;
+}
+
+.history-time {
+  font-size: 11px;
+  color: #777777;
+}
+
+.history-speaker {
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.history-speaker.known {
+  color: #40FF5E;
+}
+
+.history-speaker.unknown {
+  color: #FFB040;
+}
+
+.history-text {
+  font-size: 13px;
+  color: #E6E6E6;
+  flex: 1;
+}
+
+.history-empty {
+  font-size: 12px;
+  color: #777777;
+  text-align: center;
+  padding: 10px 0;
 }
 
 .settings-panel {
