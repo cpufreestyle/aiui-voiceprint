@@ -12,9 +12,21 @@
 
 import {
   routeKeyEvent,
+  routeVoiceWakeup,
   installKeyboardFallback,
   removeKeyboardFallback
 } from './gesture.js';
+
+/**
+ * 语音 / 触控唤醒通道路由。
+ * 官方 page-events.md：页面定义 onVoiceWakeup(event) 接收唤醒，
+ * event.keyword 区分来源——触控唤醒固定为 'clickAiAssist'，语音唤醒词是 '乐奇' / 'Hi Rokid'。
+ * 仿真器 / 真机上这一路若不接，用户点屏幕就「毫无反应」（审核驳回理由 2）。
+ * 用法：onVoiceWakeup: gestureVoiceWakeup
+ */
+export function gestureVoiceWakeup(event) {
+  routeVoiceWakeup(this, event);
+}
 
 // 与页面原始 onKeyDown 行为一致：记录时间戳并转发给手势路由。
 export function gestureKeyDown(event) {

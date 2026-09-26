@@ -50,6 +50,7 @@
               "speaker": { "type": "string", "description": "说话人名称" },
               "text": { "type": "string", "description": "识别到的文字" },
               "isKnown": { "type": "boolean", "description": "是否为已录入/已起名的人" },
+              "speakerClass": { "type": "string", "description": "说话人标签样式类（known/unknown，预计算避免模板三元）" },
               "timeText": { "type": "string", "description": "HH:MM 时间文本" }
             }
           }
@@ -64,7 +65,7 @@
 <script setup>
 import wx from 'wx';
 import { safeBack } from '../../utils/gesture.js';
-import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
+import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard, gestureVoiceWakeup } from '../../utils/page-shell.js';
 import { acquireRecorderManager, probeRecordingApis } from '../../utils/recorder.js';
 import { extractFeatures, createTemplate, identifySpeaker, combineFrames, generateWaveform, MIN_AUDIO_BYTES, MIN_ENERGY } from '../../utils/voiceprint-engine.js';
 import { initAsr, startAsr, stopAsr, takeLatestText, asrMode, isAsrAvailable } from '../../utils/asr.js';
@@ -227,12 +228,19 @@ export default {
     this.recorderManager.onFrameRecorded(function (res) {
       try {
         const frameBuffer = res.frameBuffer;
-        if (frameBuffer) {
-          that.data.segmentBuffers.push(frameBuffer);
+        // 官方 media-capture.md：frameBuffer 只在本次回调内有效，必须切片复制后再保存
+        // （直接 push 引用会让底层缓冲被覆盖 → 合成音频是噪声 → 说话人识别全乱）。
+        const copy = frameBuffer && typeof frameBuffer.slice === 'function' ? frameBuffer.slice(0) : null;
+        if (copy) {
+          // 权威帧缓冲放非 data 字段（绝不会被 setData 冲掉），data 里保留镜像兼容旧读取
+          if (!Array.isArray(that._segmentBuffers)) that._segmentBuffers = [];
+          that._segmentBuffers.push(copy);
+          if (!Array.isArray(that.data.segmentBuffers)) that.data.segmentBuffers = [];
+          that.data.segmentBuffers.push(copy);
           const nowt = Date.now();
           if (nowt - (that._lastWaveT || 0) > 120) {
             that._lastWaveT = nowt;
-            that.setData({ waveformData: generateWaveform(frameBuffer) });
+            that.setData({ waveformData: generateWaveform(copy) });
           }
         }
       } catch (e) {
@@ -244,8 +252,12 @@ export default {
     this.recorderManager.onStop(function () {
       that._clearTimer(that._watchdog);
       try {
-        const buffers = that.data.segmentBuffers;
+        // 官方承诺「剩余音频帧处理完成后才触发 onStop」，此时帧已到齐，可直接合并
+        const buffers = (Array.isArray(that._segmentBuffers) && that._segmentBuffers.length)
+          ? that._segmentBuffers
+          : (that.data.segmentBuffers || []);
         that.data.segmentBuffers = [];
+        that._segmentBuffers = [];
         const combined = buffers && buffers.length ? combineFrames(buffers) : null;
         that.processSegment(combined);
       } catch (e) {
@@ -323,6 +335,8 @@ export default {
       try { this.recorderManager.stop(); } catch (e) {}
     }
     this.data._recording = false;
+    this.data.segmentBuffers = [];
+    this._segmentBuffers = [];
     this.setData({ isListening: false, statusBarClass: '', statusText: '已暂停聆听' });
     speak('已暂停聆听');
   },
@@ -339,17 +353,28 @@ export default {
     }
     that.data._recording = true;
     that.data.segmentBuffers = [];
+    that._segmentBuffers = [];
     try {
       // 同步启动 Rokid 语音识别器（与录音同窗口，结束由 stopAsr 收尾）。
       // 复用 ensureAsrOpen：若 onShow 已开启则跳过，避免重复 start 卡死麦克风。
       that.ensureAsrOpen();
-      that.recorderManager.start({
-        duration: that.data.recDuration,
+      // 官方 start() 只认 sampleRate / numberOfChannels / format / frameSize 四项，
+      // 没有 duration、没有 encodeBitRate——多传会直接失败（录入/字幕不可用的根因之一）。
+      // start() 返回 Promise，权限被拒时拒绝，必须 catch，否则出现未处理拒绝。
+      const ret = that.recorderManager.start({
         sampleRate: 16000,
         numberOfChannels: 1,
-        encodeBitRate: 48000,
-        format: 'pcm'
+        format: 'pcm',
+        frameSize: 250
       });
+      if (ret && typeof ret.then === 'function') {
+        ret.catch(function (e) {
+          that.data._recording = false;
+          console.log('启动录音被拒绝: ' + (e && e.message ? e.message : e));
+          that.setData({ statusText: '启动录音失败，已停止', isListening: false, statusBarClass: '' });
+          speak('启动录音失败');
+        });
+      }
     } catch (e) {
       that.data._recording = false;
       console.log('启动录音失败: ' + e);
@@ -485,7 +510,8 @@ export default {
       key: unknownKey || ('known_' + speakerLabel),
       speaker: speakerLabel,
       text: text,
-      isKnown: isKnown
+      isKnown: isKnown,
+      speakerClass: isKnown ? 'known' : 'unknown'
     };
     const subs = that.data.subtitles.concat([newSub]);
     // 最多保留 30 条，避免无限增长
@@ -499,7 +525,7 @@ export default {
     try {
       let hist = wx.getStorageSync('conversation_history') || [];
       if (!Array.isArray(hist)) hist = [];
-      hist.push({ key: newSub.key, speaker: speakerLabel, text: text, isKnown: isKnown, ts: Date.now() });
+      hist.push({ key: newSub.key, speaker: speakerLabel, text: text, isKnown: isKnown, speakerClass: newSub.speakerClass, ts: Date.now() });
       if (hist.length > 50) hist = hist.slice(hist.length - 50);
       wx.setStorageSync('conversation_history', hist);
     } catch (e) { console.log('历史持久化失败: ' + e); }
@@ -591,7 +617,7 @@ export default {
     unknown.label = name;
     const subs = that.data.subtitles.map((s) => {
       if (s.key === key) {
-        return Object.assign({}, s, { speaker: name, isKnown: true });
+        return Object.assign({}, s, { speaker: name, isKnown: true, speakerClass: 'known' });
       }
       return s;
     });
@@ -618,7 +644,7 @@ export default {
       const hist = wx.getStorageSync('conversation_history');
       if (Array.isArray(hist)) {
         const hist2 = hist.map((h) => h.key === key
-          ? Object.assign({}, h, { speaker: name, isKnown: true })
+          ? Object.assign({}, h, { speaker: name, isKnown: true, speakerClass: 'known' })
           : h);
         wx.setStorageSync('conversation_history', hist2);
       }
@@ -645,6 +671,7 @@ export default {
       speaker: h.speaker || '未知',
       text: h.text || '',
       isKnown: !!h.isKnown,
+      speakerClass: h.speakerClass || (h.isKnown ? 'known' : 'unknown'),
       timeText: this.formatTs(h.ts)
     }));
     const wasListening = this.data.isListening;
@@ -678,17 +705,20 @@ export default {
   onKeyDown: gestureKeyDown,
   onKeyUp: gestureKeyUp,
 
+  // 语音 / 触控唤醒通道（官方 onVoiceWakeup；触控唤醒 keyword = 'clickAiAssist'）
+  onVoiceWakeup: gestureVoiceWakeup,
+
   // 返回键：无论是否卡死，先停止聆听并退出本页，保证一定能退出来
   handleBack() {
     try { this.stopListening(); } catch (e) { console.log('[conversation] stopListening 异常: ' + (e && e.message ? e.message : e)); }
-    safeBack();
+    safeBack(null, this);
   },
 
   // 屏幕「返回主页」按钮：不依赖按键通道，直接停聆听并跳回主页（绕过按鍵識別問題）
   goBackHome() {
     console.log('[conversation] 点击返回主页');
     try { this.stopListening(); } catch (e) { console.log('[conversation] stopListening 异常: ' + (e && e.message ? e.message : e)); }
-    safeBack();
+    safeBack(null, this);
   },
 
   // 短按：进入 - 给最近一位陌生人起名（现场起名）；历史回看模式下短按=退出回看
@@ -721,11 +751,11 @@ export default {
 <page>
   <view class="container">
     <view class="header-row">
-      <view class="back-btn" bindtap="goBackHome">
+      <view class="back-btn" bindtap="goBackHome" data-gesture-ignore="1">
         <text class="back-btn-text">← 返回主页</text>
       </view>
       <text class="title">对话字幕</text>
-      <view class="mode-badge {{modeBadgeClass}}" bindtap="refreshAsrMode">
+      <view class="mode-badge {{modeBadgeClass}}" bindtap="refreshAsrMode" data-gesture-ignore="1">
         <text>{{asrModeText}}</text>
       </view>
     </view>
@@ -737,10 +767,10 @@ export default {
       <text class="status-text">{{statusText}}</text>
     </view>
 
-    <view class="settings-toggle" bindtap="toggleSettings">
+    <view class="settings-toggle" bindtap="toggleSettings" data-gesture-ignore="1">
       <text>设置（时长 {{recDuration/1000}}s ｜ 语言 {{asrLang}}）</text>
     </view>
-    <view class="history-toggle" bindtap="openHistory">
+    <view class="history-toggle" bindtap="openHistory" data-gesture-ignore="1">
       <text>字幕回看（最近 50 条）</text>
     </view>
 
@@ -748,29 +778,29 @@ export default {
       <view class="history-head">
         <text class="history-title">历史字幕（最新在上）</text>
         <view class="history-actions">
-          <view class="history-btn" bindtap="clearHistory"><text>清空</text></view>
-          <view class="history-btn" bindtap="closeHistory"><text>关闭</text></view>
+          <view class="history-btn" bindtap="clearHistory" data-gesture-ignore="1"><text>清空</text></view>
+          <view class="history-btn" bindtap="closeHistory" data-gesture-ignore="1"><text>关闭</text></view>
         </view>
       </view>
       <scroll-view class="history-list" scroll-y="true">
         <view class="history-item" ink:for="{{historyEntries}}" ink:key="id">
           <text class="history-time">{{item.timeText}}</text>
-          <text class="history-speaker {{item.isKnown ? 'known' : 'unknown'}}">{{item.speaker}}</text>
+          <text class="history-speaker {{item.speakerClass}}">{{item.speaker}}</text>
           <text class="history-text">{{item.text}}</text>
         </view>
         <text class="history-empty" ink:if="{{historyEntries.length === 0}}">还没有历史字幕，先开始聆听对话吧</text>
       </scroll-view>
     </view>
     <view class="settings-panel" ink:if="{{showSettings}}">
-      <view class="settings-item" bindtap="cycleDuration">
+      <view class="settings-item" bindtap="cycleDuration" data-gesture-ignore="1">
         <text class="settings-label">录音时长</text>
         <text class="settings-value">{{recDuration/1000}} 秒（点击切换）</text>
       </view>
-      <view class="settings-item" bindtap="cycleLang">
+      <view class="settings-item" bindtap="cycleLang" data-gesture-ignore="1">
         <text class="settings-label">识别语言</text>
         <text class="settings-value">{{asrLang}}（点击切换）</text>
       </view>
-      <view class="settings-item" bindtap="toggleVoicePromptSetting">
+      <view class="settings-item" bindtap="toggleVoicePromptSetting" data-gesture-ignore="1">
         <text class="settings-label">语音提示</text>
         <text class="settings-value">{{voicePromptText}}</text>
       </view>
@@ -794,10 +824,10 @@ export default {
     </scroll-view>
 
     <view class="gesture-hint">
-      <text>短按：为陌生人起名 ｜ 左滑：清空字幕 ｜ 右滑：开始/暂停聆听 ｜ 双击：退出</text>
+      <text>短按：为陌生人起名（回看时=退出回看）｜ 左滑：清空字幕 ｜ 右滑：开始/暂停聆听（退出回看后右滑恢复聆听）｜ 双击：退出</text>
     </view>
 
-    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap">
+    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap" data-gesture-ignore="1">
       <text class="sim-tap-text">仿真操作：点此=短按（为陌生人起名）｜ 长按此区域=退出 ｜ 键盘双击空格=退出</text>
     </view>
   </view>

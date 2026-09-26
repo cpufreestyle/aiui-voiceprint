@@ -57,10 +57,10 @@
 <script setup>
 import wx from 'wx';
 import { safeBack } from '../../utils/gesture.js';
-import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
+import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard, gestureVoiceWakeup } from '../../utils/page-shell.js';
 import { acquireRecorderManager } from '../../utils/recorder.js';
 import { extractFeatures, identifySpeaker, isRecordingValid } from '../../utils/voiceprint-engine.js';
-import { setupRecorderListeners, startRecordingSession, stopRecordingSession } from '../../utils/recording-session.js';
+import { setupRecorderListeners, teardownRecorderListeners, startRecordingSession, stopRecordingSession, abortRecordingSession } from '../../utils/recording-session.js';
 import { speak } from '../../utils/tts.js';
 
 export default {
@@ -84,8 +84,10 @@ export default {
   onUnload() {
     // 清理录音监听器
     if (this.recorderManager) {
-      this.recorderManager.offFrameRecorded();
+      try { teardownRecorderListeners(this); } catch (e) {}
     }
+    // 取消尚未收尾的录音，避免 onStop 兜底回调再进入已销毁的页面
+    try { abortRecordingSession(this); } catch (e2) {}
     // 释放 window 级键盘兜底监听（redirectTo/navigateBack 走 onUnload，不一定触发 onHide）
     shellRemoveKeyboard(this);
   },
@@ -101,6 +103,9 @@ export default {
   onKeyDown: gestureKeyDown,
 
   onKeyUp: gestureKeyUp,
+
+  // 语音 / 触控唤醒通道（官方 onVoiceWakeup；触控唤醒 keyword = 'clickAiAssist'）
+  onVoiceWakeup: gestureVoiceWakeup,
 
     startVerification() {
       startRecordingSession(this, {
@@ -121,7 +126,15 @@ export default {
           classKey: 'statusBoxClass',
           extraData: { verificationPath: 'verification_' + Date.now() }
         },
-        (combinedAudio) => {
+        (combinedAudio, meta) => {
+          meta = meta || {};
+          const frames = (typeof meta.frames === 'number') ? meta.frames
+            : (this._frameBuffers ? this._frameBuffers.length : 0);
+          // 录音链路失败（权限被拒 / 一帧未收）与「声音太小」必须区分提示，
+          // 否则用户只看到「请重试」，却永远不知道是麦克风没权限。
+          this._lastInvalidHint = (meta.error || frames === 0)
+            ? ((meta.error || '没有采集到音频帧') + '，请检查麦克风权限后重试')
+            : '没录到清晰声音，请重试';
           // 执行验证
           this.verifyVoiceprint(combinedAudio);
         }
@@ -133,6 +146,7 @@ export default {
       that.setData({ status: '正在验证身份...' });
 
       setTimeout(function() {
+        const hint = that._lastInvalidHint || '没录到清晰声音，请重试';
         // 用真实声纹引擎比对已注册用户
         let features = null;
         try {
@@ -147,11 +161,11 @@ export default {
           const invalid = {
             success: false,
             confidence: '0.00',
-            message: '没录到清晰声音，请重试',
+            message: hint,
             timestamp: new Date().toLocaleString()
           };
           that.setData({ status: invalid.message, result: invalid, statusBoxClass: 'failed' });
-          speak('没录到清晰声音，请重试');
+          speak(hint);
           return;
         }
 
@@ -199,7 +213,7 @@ export default {
     },
     
     goHome() {
-      safeBack();
+      safeBack(null, this);
     },
     
     tryAgain() {
@@ -270,21 +284,21 @@ export default {
     </view>
     
     <view class="button-group">
-      <button bindtap="startVerification" disabled="{{isVerifying}}" class="verify-btn">
+      <button bindtap="startVerification" disabled="{{isVerifying}}" class="verify-btn" data-gesture-ignore="1">
         <text class="btn-main-text">开始验证</text>
         <text class="btn-sub-text">录制3秒钟</text>
       </button>
       
-      <button bindtap="tryAgain" class="retry-btn" ink:if="{{result}}">
+      <button bindtap="tryAgain" class="retry-btn" ink:if="{{result}}" data-gesture-ignore="1">
         <text class="btn-main-text">重新验证</text>
       </button>
       
-      <button bindtap="goHome" class="home-btn">
+      <button bindtap="goHome" class="home-btn" data-gesture-ignore="1">
         <text class="btn-main-text">返回主页</text>
       </button>
     </view>
 
-    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap">
+    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap" data-gesture-ignore="1">
       <text class="sim-tap-text">仿真操作：点此=短按（开始验证）｜ 长按此区域=退出 ｜ 键盘双击空格=退出</text>
     </view>
   </view>

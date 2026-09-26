@@ -72,10 +72,10 @@
 <script setup>
 import wx from 'wx';
 import { safeBack } from '../../utils/gesture.js';
-import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard } from '../../utils/page-shell.js';
-import { acquireRecorderManager } from '../../utils/recorder.js';
+import { gestureKeyDown, gestureKeyUp, shellInstallKeyboard, shellRemoveKeyboard, gestureVoiceWakeup } from '../../utils/page-shell.js';
+import { acquireRecorderManager, probeRecordingApis } from '../../utils/recorder.js';
 import { extractFeatures, createTemplate, isRecordingValid } from '../../utils/voiceprint-engine.js';
-import { setupRecorderListeners, startRecordingSession, stopRecordingSession } from '../../utils/recording-session.js';
+import { setupRecorderListeners, teardownRecorderListeners, startRecordingSession, stopRecordingSession, abortRecordingSession } from '../../utils/recording-session.js';
 import { speak } from '../../utils/tts.js';
 import { setActiveUser } from '../../utils/active-user.js';
 
@@ -145,6 +145,12 @@ export default {
     if (this.recorderManager) {
       this.recorderManager.offFrameRecorded();
     }
+    this._recFailStreak = 0;
+    // 必须完整卸载：只调 offFrameRecorded 会残留 onStop / onError，
+    // 页面销毁后回调仍可能触发 setData（框架刷 bindings 告警甚至崩溃）。
+    try { teardownRecorderListeners(this); } catch (e) {}
+    // 中止尚未收尾的录音，避免 onStop 兜底回调再进入已销毁的页面
+    try { abortRecordingSession(this); } catch (e2) {}
     // 释放 window 级键盘兜底监听（redirectTo/navigateBack 走 onUnload，不一定触发 onHide）
     shellRemoveKeyboard(this);
   },
@@ -160,6 +166,9 @@ export default {
   onKeyDown: gestureKeyDown,
 
   onKeyUp: gestureKeyUp,
+
+  // 语音 / 触控唤醒通道（官方 onVoiceWakeup；触控唤醒 keyword = 'clickAiAssist'）
+  onVoiceWakeup: gestureVoiceWakeup,
 
   // ============ 向导流程（全自动流转）============
 
@@ -239,19 +248,8 @@ export default {
     // 无录音能力（仿真 / 麦克风权限被拒）：明确退回 intro 并语音告知，
     // 否则 startRecordingSession 会静默 return，向导永久卡死在「现在，念出来」这一步。
     if (!this.recorderManager) {
-      this.data.wizardActive = false;
-      this._currentSentence = 0;
-      this.data.sampleFeatures = [];
-      this.setData({
-        wizardActive: false,
-        wizardStep: 'intro',
-        wizardCaption: '当前环境无法录音',
-        wizardHint: '请检查麦克风权限后，点一下重试',
-        countdownNum: '',
-        sampleCount: 0,
-        progressDots: ['', '', '']
-      });
-      speak('当前环境无法录音，请检查麦克风权限');
+      // 一并展开手动模式 + 输出可用接口，别把用户留在「点了开始却毫无反应」的入口
+      this.abortWizardWithReason('当前环境无法录音', '未获取到录音管理器');
       return;
     }
     this._skipNextStop = false; // 清除可能残留的取消标记，确保本句能正常录入
@@ -314,6 +312,38 @@ export default {
       if (!that.data.wizardActive) return;
       that.wizardCountdown();
     }, 1800);
+  },
+
+  // 录音链路不可用 / 连续失败时的最终防线：立即停止向导并退回 intro，
+  // 同时展开手动模式并给出诊断。正是这里缺失，才导致用户陷入
+  // 「点了开始 → 没声音 → 自动重录 → 还没声音」的死循环（审核：录入功能不可用）。
+  abortWizardWithReason(title, reason) {
+    this.data.wizardActive = false;
+    this._currentSentence = 0;
+    this.data.sampleFeatures = [];
+    this.data.pendingFeature = null;
+    this._recFailStreak = 0;
+    let apis = '探测失败';
+    try {
+      const list = probeRecordingApis();
+      apis = (list && list.length) ? list.join(',') : '当前运行时不提供任何录音接口';
+    } catch (e) {}
+    this.setData({
+      wizardActive: false,
+      wizardStep: 'intro',
+      showManual: true,
+      manualToggleText: '收起手动模式',
+      wizardCaption: title,
+      wizardHint: (reason || '未知原因') + '。可展开下方「手动模式」逐步操作；当前可用录音接口：' + apis,
+      countdownNum: '',
+      sentenceIndexText: '共 ' + WIZARD_TOTAL + ' 句',
+      isRecording: false,
+      recordingClass: '',
+      recorded: false,
+      sampleCount: 0,
+      progressDots: ['', '', '']
+    });
+    speak(title + '，请检查麦克风权限，或使用手动模式');
   },
 
   // 生成声纹并入库，成功后进入「是否启用」
@@ -382,7 +412,7 @@ export default {
       try {
         wx.showToast({ title: '声纹注册成功', icon: 'success', duration: 1500 });
       } catch (e) {}
-      setTimeout(function () { safeBack(); }, 1500);
+      setTimeout(function () { safeBack(null, that); }, 1500);
     }, 1200);
   },
 
@@ -419,18 +449,38 @@ export default {
           recordingPath: 'recording_' + Date.now()
         }
       },
-      (combinedAudio) => {
+      (combinedAudio, meta) => {
         const that = this;
-        // 提取本次录音特征，并校验有效性（太短 / 静音则不计入，避免坏样本污染模板）
-        let features = null;
+        meta = meta || {};
+      // 提取本次录音特征，并校验有效性（太短 / 静音则不计入，避免坏样本污染模板）
+      let features = null;
         try {
           features = extractFeatures(combinedAudio);
         } catch (e) {
           console.log('提取特征失败: ' + e);
         }
-        const valid = isRecordingValid(combinedAudio, features);
+      const valid = isRecordingValid(combinedAudio, features);
 
-
+      // ===== 录音链路失败判定（审核驳回理由 1 的核心修复）=====
+      // meta.error      = start() 被拒 / onError（麦克风权限、format 不支持……）
+      // meta.frames===0 = 一帧都没收到（管理器拿错、帧没 slice 复制……）
+      // !valid          = 帧太少或全是静音
+      // 任一种都记为一次失败；连续失败 2 次立即停下并给出诊断，
+      // 绝不再让 wizardRetry 无限重录——那样用户永远录不完，就是「录入不可用」。
+      const frameCount = (typeof meta.frames === 'number') ? meta.frames
+        : (that._frameBuffers ? that._frameBuffers.length : 0);
+      const linkBroken = !!meta.error || frameCount === 0 || !valid;
+      if (linkBroken) {
+        that._recFailStreak = (that._recFailStreak || 0) + 1;
+      } else {
+        that._recFailStreak = 0;
+      }
+      if (that._recFailStreak >= 2) {
+        that.abortWizardWithReason('录音链路异常',
+          meta.error ? meta.error
+            : (frameCount === 0 ? '没有采集到任何音频帧' : '没录到清晰声音'));
+        return;
+      }
         // ===== 向导模式：自动保存并推进，无需用户点「保存」=====
         if (that.data.wizardActive) {
           if (!valid) {
@@ -563,7 +613,7 @@ export default {
 
     setTimeout(function () {
       wx.showToast({ title: '声纹注册成功', icon: 'success', duration: 2000 });
-      setTimeout(function () { safeBack(); }, 2000);
+      setTimeout(function () { safeBack(null, that); }, 2000);
     }, 1000);
   },
 
@@ -605,17 +655,26 @@ export default {
 
   cancelEnroll() {
     this.data.wizardActive = false;
-    safeBack();
+    safeBack(null, this);
   },
 
   // 镜腿短按：单键推进整条流程
   // 录音中→停止；已录待存→保存样本；已满 3 个样本→完成注册；否则→开始录音。
   // 双击已用于「退出」，故完成注册并入短按流程（录满 3 个后短按即完成）。
   handleTap() {
-    if (this.data.wizardActive || this.data.wizardStep === 'activate' || this.data.wizardStep === 'intro') {
-      if (this.data.wizardStep === 'intro') {
-        this.startWizard();
-      } else if (this.data.wizardStep === 'activate') {
+    // ===== 起始步：先确认录音能力，再进向导 =====
+    // 拿不到录音管理器时直接给诊断 + 展开手动模式。否则用户点了「开始」后一路无声，
+    // 只会看到无限重录，正是审核说的「录入功能不可用」。
+    if (this.data.wizardStep === 'intro') {
+      if (!this.recorderManager) {
+        this.abortWizardWithReason('当前环境无法录音', '未获取到录音管理器');
+        return;
+      }
+      this.startWizard();
+      return;
+    }
+    if (this.data.wizardActive || this.data.wizardStep === 'activate') {
+      if (this.data.wizardStep === 'activate') {
         this.wizardActivateYes();
       }
       // 其余向导步骤自动流转，短按不打断
@@ -692,7 +751,7 @@ export default {
     </view>
 
     <!-- ===== 手动模式（兜底，默认折叠）===== -->
-    <button class="manual-toggle" bindtap="toggleManual">
+    <button class="manual-toggle" bindtap="toggleManual" data-gesture-ignore="1">
       <text>{{manualToggleText}}</text>
     </button>
 
@@ -701,18 +760,18 @@ export default {
         <text class="status-text">{{status}}</text>
       </view>
       <view class="button-group">
-        <button bindtap="startRecording" disabled="{{isRecording}}" class="record-btn">
+        <button bindtap="startRecording" disabled="{{isRecording}}" class="record-btn" data-gesture-ignore="1">
           <text class="btn-main-text">开始录音</text>
           <text class="btn-sub-text">录制3秒钟</text>
         </button>
-        <button bindtap="stopRecording" disabled="{{!isRecording}}" class="stop-btn">
+        <button bindtap="stopRecording" disabled="{{!isRecording}}" class="stop-btn" data-gesture-ignore="1">
           <text class="btn-main-text">停止录音</text>
         </button>
-        <button bindtap="saveVoiceprint" disabled="{{!recorded}}" class="save-btn">
+        <button bindtap="saveVoiceprint" disabled="{{!recorded}}" class="save-btn" data-gesture-ignore="1">
           <text class="btn-main-text">保存样本</text>
           <text class="btn-sub-text">确认保存当前录音</text>
         </button>
-        <button bindtap="finishEnroll" disabled="{{sampleCount < 3}}" class="finish-btn">
+        <button bindtap="finishEnroll" disabled="{{sampleCount < 3}}" class="finish-btn" data-gesture-ignore="1">
           <text class="btn-main-text">完成注册</text>
           <text class="btn-sub-text">用全部样本生成声纹</text>
         </button>
@@ -721,7 +780,7 @@ export default {
 
     <text class="gesture-hint">短按：开始 / 启用 ｜ 滑动：切换功能 ｜ 双击：退出</text>
 
-    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap">
+    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap" data-gesture-ignore="1">
       <text class="sim-tap-text">仿真操作：点此=短按（开始向导 / 启用声纹）｜ 长按此区域=退出</text>
     </view>
   </view>

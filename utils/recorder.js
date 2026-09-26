@@ -2,8 +2,8 @@ import wx from 'wx';
 
 /**
  * 安全获取录音管理器。不同运行时 API 位置不同：
- *   - 标准小程序 / 多数 AIUI(JSAR) 运行时：wx.getRecorderManager()
- *   - 部分 Rokid 文档示例：wx.media.getRecorderManager()
+ *   - AIUI 官方（media-capture.md）：wx.media.getRecorderManager() ← 优先
+ *   - 小程序风格兼容：wx.getRecorderManager()
  * 拿不到时返回 null（绝不抛错），由调用方进入演示模式或静默，
  * 否则 onLoad 抛错会中断页面初始化，连带导致按键/返回全部失效。
  *
@@ -11,23 +11,32 @@ import wx from 'wx';
  */
 export function acquireRecorderManager() {
   const candidates = [];
-  try {
-    if (typeof wx.getRecorderManager === 'function') candidates.push(wx.getRecorderManager);
-  } catch (e) {}
+  let stub = null;
+  // 顺序很关键：官方 AIUI 文档只定义了 wx.media.getRecorderManager()，
+  // 且它在 wasm32 / 无录音能力时返回 undefined，是规范入口，故优先取它。
+  // 旧代码顺序相反，某些运行时两个都存在，但 wx.getRecorderManager 返回的是
+  // 不完整桩对象（没有 onFrameRecorded）→ 一帧都收不到 → 「录入功能不可用」。
   try {
     if (wx && wx.media && typeof wx.media.getRecorderManager === 'function') {
       candidates.push(wx.media.getRecorderManager);
     }
   } catch (e) {}
+  try {
+    if (typeof wx.getRecorderManager === 'function') candidates.push(wx.getRecorderManager);
+  } catch (e) {}
   for (let i = 0; i < candidates.length; i++) {
     try {
       const mgr = candidates[i].call(wx);
-      if (mgr) return mgr;
+      // 只认「真的能收到音频帧」的管理器：没有 onFrameRecorded 的桩对象
+      // 先留着当兜底，让上层至少能调用 start/stop 表现成「无法录音」，
+      // 而不是静默地一帧不收。
+      if (mgr && typeof mgr.onFrameRecorded === 'function') return mgr;
+      if (mgr && !stub) stub = mgr;
     } catch (e) {
       console.log('[recorder] 初始化失败: ' + (e && e.message ? e.message : e));
     }
   }
-  return null;
+  return stub || null;
 }
 
 /**
@@ -37,14 +46,26 @@ export function acquireRecorderManager() {
  */
 export function probeRecordingApis() {
   const found = [];
+  const push = function (k, v) {
+    try { found.push(k + (typeof v === 'function' ? '()' : '')); } catch (e) {}
+  };
   try {
     if (typeof wx === 'undefined' || !wx) return found;
     const keys = Object.keys(wx);
     const want = /record|speech|recogni|audio|media|voice|asr|mic/i;
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
-      if (want.test(k)) found.push(k + (typeof wx[k] === 'function' ? '()' : ''));
+      if (want.test(k)) push(k, wx[k]);
     }
+    // 官方入口藏在 wx.media 下，单独列出来便于一眼确认
+    try {
+      if (wx.media) {
+        const mkeys = Object.keys(wx.media);
+        for (let j = 0; j < mkeys.length; j++) {
+          push('wx.media.' + mkeys[j], wx.media[mkeys[j]]);
+        }
+      }
+    } catch (e2) {}
   } catch (e) {
     console.log('[recorder] 探测接口失败: ' + (e && e.message ? e.message : e));
   }

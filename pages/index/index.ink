@@ -64,7 +64,7 @@
 <script setup>
 import wx from 'wx';
 import { installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
-import { gestureKeyDown, gestureKeyUp } from '../../utils/page-shell.js';
+import { gestureKeyDown, gestureKeyUp, gestureVoiceWakeup } from '../../utils/page-shell.js';
 import { getActiveUser, setActiveUser, reconcileActiveUser } from '../../utils/active-user.js';
 import { speak } from '../../utils/tts.js';
 
@@ -115,6 +115,9 @@ export default {
   },
   onKeyDown: gestureKeyDown,
   onKeyUp: gestureKeyUp,
+
+  // 语音 / 触控唤醒通道（官方 onVoiceWakeup；触控唤醒 keyword = 'clickAiAssist'）
+  onVoiceWakeup: gestureVoiceWakeup,
   // 镜腿短按：进入当前高亮选中的功能
   handleTap() {
     this.enterSelected();
@@ -140,7 +143,7 @@ export default {
 
   // 退出当前页面 / 返回宿主
   exitApp() {
-    safeBack();
+    safeBack(null, this);
   },
   // 镜腿滑动：在菜单项间移动高亮（滑块），作为「滑动选取」；短按进入选中项。
   // 眼镜镜腿仅一条轴，系统上报 ArrowUp/ArrowDown；仿真平台键盘为 ArrowLeft/ArrowRight。
@@ -256,11 +259,23 @@ export default {
     this.setData({ statusText: `视图：${newMode === 'list' ? '列表' : '网格'}` });
   },
 
+  // 统一写库：失败时给失败提示，绝不假报成功（存储写满/异常时兜底）
+  saveDb(db, okMsg) {
+    try {
+      wx.setStorageSync('voiceprint_db', db);
+      if (okMsg) wx.showToast({ title: okMsg, icon: 'success', duration: 1500 });
+      return true;
+    } catch (e) {
+      wx.showToast({ title: '保存失败，请清理存储后重试', icon: 'none', duration: 2000 });
+      return false;
+    }
+  },
+
   clearAllUsers() {
     const db = wx.getStorageSync('voiceprint_db');
     if (db) {
       db.users = [];
-      wx.setStorageSync('voiceprint_db', db);
+      this.saveDb(db);
       this.loadVoiceprintDB();
     }
   },
@@ -270,7 +285,7 @@ export default {
     const db = wx.getStorageSync('voiceprint_db');
     if (db && db.users) {
       db.users = db.users.filter((u) => u.id !== userId);
-      wx.setStorageSync('voiceprint_db', db);
+      this.saveDb(db);
       reconcileActiveUser(); // 若删掉的是当前身份，清空启用标记
       this.loadVoiceprintDB();
     }
@@ -299,9 +314,9 @@ export default {
         const u = db2 && db2.users ? db2.users.find((x) => x.id === userId) : null;
         if (!u) return;
         u.name = name;
-        wx.setStorageSync('voiceprint_db', db2);
-        that.loadVoiceprintDB();
-        wx.showToast({ title: '已重命名：' + name, icon: 'success', duration: 1500 });
+        if (that.saveDb(db2, '已重命名：' + name)) {
+          that.loadVoiceprintDB();
+        }
       }
     });
   },
@@ -313,25 +328,35 @@ export default {
       wx.showToast({ title: '声纹库为空，无可导出', icon: 'none', duration: 1800 });
       return;
     }
-    const payload = {
-      app: 'aiui-voiceprint',
-      version: 1,
-      exportedAt: Date.now(),
-      users: db.users
-    };
-    try {
-      wx.setClipboardData({
-        data: JSON.stringify(payload),
-        success() {
-          wx.showToast({ title: '已复制 ' + db.users.length + ' 条声纹到剪贴板', icon: 'success', duration: 2000 });
-        },
-        fail() {
-          wx.showToast({ title: '复制失败，请重试', icon: 'none', duration: 1800 });
+    const count = db.users.length;
+    // 声纹模板属于生物特征信息，导出过剪贴板（明文、可被其他应用读取）前必须警示
+    wx.showModal({
+      title: '导出声纹库',
+      content: '将复制 ' + count + ' 条声纹数据（含声纹特征模板，属于生物特征信息）到剪贴板。剪贴板为明文、其他应用可能读取，请只粘贴到可信位置。确认导出？',
+      confirmText: '复制',
+      success(res) {
+        if (!res.confirm) return;
+        const payload = {
+          app: 'aiui-voiceprint',
+          version: 1,
+          exportedAt: Date.now(),
+          users: db.users
+        };
+        try {
+          wx.setClipboardData({
+            data: JSON.stringify(payload),
+            success() {
+              wx.showToast({ title: '已复制 ' + count + ' 条声纹到剪贴板', icon: 'success', duration: 2000 });
+            },
+            fail() {
+              wx.showToast({ title: '复制失败，请重试', icon: 'none', duration: 1800 });
+            }
+          });
+        } catch (e) {
+          wx.showToast({ title: '导出失败：' + e, icon: 'none', duration: 2000 });
         }
-      });
-    } catch (e) {
-      wx.showToast({ title: '导出失败：' + e, icon: 'none', duration: 2000 });
-    }
+      }
+    });
   },
 
   // 导入声纹库：从剪贴板读取 JSON，校验后按 id 去重合并（同 id 覆盖为新数据）
@@ -366,10 +391,10 @@ export default {
             db.users.forEach((u) => { byId[u.id] = u; });
             users.forEach((u) => { byId[u.id] = u; });
             db.users = Object.keys(byId).map((k) => byId[k]);
-            wx.setStorageSync('voiceprint_db', db);
-            reconcileActiveUser();
-            that.loadVoiceprintDB();
-            wx.showToast({ title: '导入完成，共 ' + db.users.length + ' 条', icon: 'success', duration: 2000 });
+            if (that.saveDb(db, '导入完成，共 ' + db.users.length + ' 条')) {
+              reconcileActiveUser();
+              that.loadVoiceprintDB();
+            }
           }
         });
       },
@@ -418,13 +443,13 @@ export default {
         class="menu-item {{item.selectedClass}}"
         ink:for="{{menuItems}}"
         ink:key="key"
-        bindtap="enterSelected">
+        bindtap="enterSelected" data-gesture-ignore="1">
         <text class="menu-text">{{item.label}}</text>
       </view>
     </view>
 
     <view class="view-toggle" ink:if="{{userCount > 0}}">
-      <button class="btn-toggle" bindtap="toggleViewMode">
+      <button class="btn-toggle" bindtap="toggleViewMode" data-gesture-ignore="1">
         <text>{{toggleText}}</text>
       </button>
     </view>
@@ -434,18 +459,18 @@ export default {
       
       <scroll-view class="user-list" scroll-y="true" ink:if="{{viewMode === 'list'}}">
         <view class="user-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id">
-          <view class="user-info" bindtap="switchActiveUser" data-id="{{item.id}}">
+          <view class="user-info" bindtap="switchActiveUser" data-id="{{item.id}}" data-gesture-ignore="1">
             <text class="user-name">{{item.name}}</text>
             <text class="user-time">{{item.enrolledAt}}</text>
           </view>
           <view class="user-actions">
-            <button class="btn-switch {{item.activeClass}}" bindtap="switchActiveUser" data-id="{{item.id}}">
+            <button class="btn-switch {{item.activeClass}}" bindtap="switchActiveUser" data-id="{{item.id}}" data-gesture-ignore="1">
               <text>{{item.activeTag}}</text>
             </button>
-            <button class="btn-rename" bindtap="renameUser" data-id="{{item.id}}">
+            <button class="btn-rename" bindtap="renameUser" data-id="{{item.id}}" data-gesture-ignore="1">
               <text>改名</text>
             </button>
-            <button class="btn-delete" bindtap="deleteUser" data-id="{{item.id}}">
+            <button class="btn-delete" bindtap="deleteUser" data-id="{{item.id}}" data-gesture-ignore="1">
               <text>删除</text>
             </button>
           </view>
@@ -453,7 +478,7 @@ export default {
       </scroll-view>
 
       <view class="user-grid" ink:if="{{viewMode === 'grid'}}">
-        <view class="grid-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id" bindtap="switchActiveUser" data-id="{{item.id}}">
+        <view class="grid-card {{item.activeClass}}" ink:for="{{registeredUsers}}" ink:key="id" bindtap="switchActiveUser" data-id="{{item.id}}" data-gesture-ignore="1">
           <text class="grid-tag" ink:if="{{item.isActive}}">当前</text>
           <text class="grid-name">{{item.name}}</text>
           <text class="grid-time">{{item.enrolledAt}}</text>
@@ -484,19 +509,19 @@ export default {
     </view>
 
     <view class="footer" ink:if="{{userCount > 0}}">
-      <button class="btn-io" bindtap="exportDb">
+      <button class="btn-io" bindtap="exportDb" data-gesture-ignore="1">
         <text>导出声纹库</text>
       </button>
-      <button class="btn-io" bindtap="importDb">
+      <button class="btn-io" bindtap="importDb" data-gesture-ignore="1">
         <text>导入声纹库</text>
       </button>
-      <button class="btn-clear" bindtap="clearAllUsers">
+      <button class="btn-clear" bindtap="clearAllUsers" data-gesture-ignore="1">
         <text>清空全部</text>
       </button>
     </view>
 
     <view class="footer" ink:if="{{userCount === 0}}">
-      <button class="btn-io" bindtap="importDb">
+      <button class="btn-io" bindtap="importDb" data-gesture-ignore="1">
         <text>从剪贴板导入声纹库</text>
       </button>
     </view>
@@ -505,7 +530,7 @@ export default {
       <text class="hint-text">滑动：选择功能 ｜ 短按：进入 ｜ 双击：退出 ｜ 返回：后退</text>
     </view>
 
-    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap">
+    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap" data-gesture-ignore="1">
       <text class="sim-tap-text">仿真操作：点此=短按（进入）｜ 长按此区域=退出 ｜ 键盘双击空格=退出</text>
     </view>
   </view>

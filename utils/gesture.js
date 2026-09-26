@@ -1,4 +1,5 @@
 import wx from 'wx';
+import { installPointerGestures, removePointerGestures } from './pointer-gesture.js';
 
 /**
  * 眼镜镜腿交互工具（AIUI / Rokid Glasses / JSAR）
@@ -17,79 +18,124 @@ import wx from 'wx';
  *   { type: 'tap',    raw }            单击（进入/执行）
  *   { type: 'swipe',  direction, raw } 滑动（left/right/up/down）
  *   { type: 'back',   raw }            返回/双击（退出）
+ *   { type: 'unknown',raw }            未识别按键（只回显，不触发任何动作）
  *   null                               event 为空
- * 任何无法识别的 code 一律兜底为一次 tap，确保“进得去功能”，
+ * 未识别 code 不再兜底成 tap——否则一次【滑动】会被误判成【点击】，
  * 同时原始 code 通过 __keyLog 回显，便于真机校准。
+ *
+ * 除了镜腿按键，本模块还负责在仿真 / 审核环境（有 window 的运行时）安装
+ * 「鼠标 / 触屏」手势识别（utils/pointer-gesture.js）：
+ * 拖拽=滑动、点按=短按、长按=双击，与按键通道共用 classifyTap。
  */
 
 /**
- * 解析镜腿按键事件。
- * @param {Object} event 按键事件对象（onKeyUp / onKeyDown 入参，或 window KeyboardEvent）
- * @returns {{ type: 'tap'|'swipe'|'back', direction?: string, raw: string } | null}
+ * 解析镜腿按键 / 仿真按键事件。
+ *
+ * @param {Object} event 按键事件对象（onKeyUp / onKeyDown 入参、window KeyboardEvent，
+ *                       或带 direction/gesture/swipe 等方向字段的宿主手势事件）
+ * @returns {{ type: 'tap'|'swipe'|'back'|'unknown', direction?: string, raw: string } | null}
+ *   null    —— event 为空
+ *   'back'  —— 返回 / 退出
+ *   'swipe' —— 滑动（direction 为 left/right/up/down）
+ *   'tap'   —— 单击（进入 / 执行）
+ *   'unknown' —— 未识别按键：**不再兜底当成 tap**（见下方说明）
+ *
+ * ⚠️ 为什么兜底从 tap 改成 unknown（官方审核驳回理由 2 的根因）：
+ *   过去「任何未识别 code 一律当作一次 tap」，于是一次【滑动】若以未收录的 code 上报，
+ *   会被直接判成【点击】→ 主页「滑动=移动高亮」永远不生效，表现出来的就是
+ *   「滑动和点击没有区分开，无法体验其他内容」。
+ *   现在未识别按键只回显原始 code 供真机校准，绝不触发任何页面动作，
+ *   保证「滑动绝不会变成点击」。
  */
 export function parseKeyEvent(event) {
   if (!event) return null;
   const code = (event.code || event.key || '').toString();
+  const lowerRaw = code.toLowerCase();
   const keyCode = typeof event.keyCode === 'number' ? event.keyCode : 0;
-  const lower = code.toLowerCase();
+  // 归一化：去掉非字母数字，便于精确比对 KEYCODE_BACK / goBack 等多种写法
+  const norm = lowerRaw.replace(/[^a-z0-9]/g, '');
+  // 有些宿主把数值键码放在 code/key 里（如 '21'），这里也按数值码解析一次
+  const numInCode = /^[0-9]+$/.test(norm) ? parseInt(norm, 10) : 0;
   const rawLabel = code || ('kc' + keyCode);
 
-  // Rokid 镜腿手势在系统层被转换成 Android 标准按键（见 Rokid 交互文档）：
-  //   单击=KEYCODE_ENTER(66)  双击=key 202  上滑=DPAD_UP(19) 下滑=DPAD_DOWN(20)
-  //   左滑=DPAD_LEFT(21) 右滑=DPAD_RIGHT(22) 前滑=key 183 后滑=key 184
-  // AIUI/JSAR 运行时可能映射为标准 code 字符串（Enter/ArrowLeft…），也可能直接透传数值 keyCode。两者都兼容。
+  // ===== 0. 宿主自带方向字段（最高优先级，说明这次输入本身就是一次手势）=====
+  // 例如 { code:'GlobalHook', direction:'forward' } / { gesture:'swipeleft' }
+  const dirFields = [event.direction, event.gesture, event.swipe, event.action, event.param, event.value];
+  for (let i = 0; i < dirFields.length; i++) {
+    const v = dirFields[i];
+    if (typeof v !== 'string' || !v) continue;
+    const d = dirFromString(v.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    if (d) return { type: 'swipe', direction: d, raw: rawLabel };
+  }
 
-  // 返回 / 双击 / 退出：Studio 仿真面板与真机的“返回系”键表达差异很大，这里统一兜住。
-  //   - Rokid 真机镜腿双击 → keyCode 202（部分固件直接映射 Backspace）
-  //   - Rokid AIUI Studio 仿真面板的「返回后退 / 双击后退 / 退出」按钮
-  //     → 多下发 KEYCODE_BACK，字符串形如 'KEYCODE_BACK' / 'Back' / 'back'，
-  //     或直接透传数值 keyCode 4（Android KEYCODE_BACK）/ 27（Escape）/ 3（HOME→退出到主页）
-  //   — 之前只认 Backspace/202，导致 'KEYCODE_BACK' 落到兜底逻辑被当成一次 tap（进得去退不出）。
-  const backKeywords = ['back', 'escape', 'home'];
-  if (
-    code === 'Backspace' ||
-    keyCode === 8 ||
-    keyCode === 202 ||
-    keyCode === 4 ||
-    keyCode === 27 ||
-    keyCode === 3
-  ) {
+  // ===== 1. 返回 / 退出 =====
+  // 精确匹配（不做子串匹配）：否则 'Backward'（后滑）会被误判成返回。
+  const backExact = [
+    'back', 'backspace', 'escape', 'esc', 'home',
+    'keycodeback', 'goback', 'backkey', 'backkeyevent', 'systemback',
+    'browserback', 'exit', 'quit'
+  ];
+  if (backExact.indexOf(norm) !== -1) return { type: 'back', raw: rawLabel };
+  // 兜住 xxxxBACK 这类封装写法（'backward' 不以 back 结尾，不会被误判）
+  if (/back$/.test(norm) && norm.length <= 16) return { type: 'back', raw: rawLabel };
+  // Android / Rokid 数值返回码
+  if (keyCode === 8 || keyCode === 202 || keyCode === 4 || keyCode === 27 || keyCode === 3 ||
+    numInCode === 8 || numInCode === 202 || numInCode === 4 || numInCode === 27 || numInCode === 3) {
     return { type: 'back', raw: rawLabel };
   }
-  for (const kw of backKeywords) {
-    if (lower.indexOf(kw) !== -1) return { type: 'back', raw: rawLabel };
+
+  // ===== 2. 滑动 =====
+  // 2.0 原始 DOM 事件名（TouchDown / MouseUp ...）不是手势，绝不能当滑动或点击：
+  //      'touchdown' 里含 'down'，若放行会被误判成「下滑」。
+  const domEventNames = ['touchstart', 'touchend', 'touchmove', 'touchcancel',
+    'touchdown', 'touchup', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick'];
+  for (let di = 0; di < domEventNames.length; di++) {
+    if (norm === domEventNames[di]) return { type: 'unknown', raw: rawLabel };
+  }
+  // 2.1 按数值方向码（Android DPAD + Rokid 前滑/后滑）
+  const dirByNum = { 19: 'up', 20: 'down', 21: 'left', 22: 'right', 183: 'left', 184: 'right' };
+  if (dirByNum[keyCode]) return { type: 'swipe', direction: dirByNum[keyCode], raw: rawLabel };
+  if (dirByNum[numInCode]) return { type: 'swipe', direction: dirByNum[numInCode], raw: rawLabel };
+  // 2.2 按字符串关键字：ArrowLeft / SwipeUp / DPAD_RIGHT / forward / backward ...
+  const dir = dirFromString(norm);
+  if (dir) return { type: 'swipe', direction: dir, raw: rawLabel };
+
+  // ===== 3. 单击 =====
+  const tapExact = [
+    'globalhook', 'enter', 'numpadenter', 'space', 'spacebar', 'tap', 'center', 'click',
+    'keycodeenter', 'dpadcenter', 'ok', 'confirm', 'single', 'press'
+  ];
+  // 触控唤醒（官方 onVoiceWakeup 的 keyword）也可能以按键 code 的形式到达，
+  // 必须明确认成 tap：漏掉它在仿真器里就「点了没反应」。
+  const tapExactExtra = ['clickaiassist', 'aiassist', 'wakeup', 'temple', 'touch'];
+  if (tapExact.indexOf(norm) !== -1) return { type: 'tap', raw: rawLabel };
+  for (let ti = 0; ti < tapExactExtra.length; ti++) {
+    if (norm === tapExactExtra[ti]) return { type: 'tap', raw: rawLabel };
+  }
+  const tapNum = { 13: 1, 32: 1, 66: 1, 23: 1 };
+  if (tapNum[keyCode] || tapNum[numInCode]) return { type: 'tap', raw: rawLabel };
+
+  // ===== 4. 明确的长按 / 双击类：不当 tap（否则长按退出会被当成进入）=====
+  if (norm.indexOf('long') !== -1 || norm.indexOf('double') !== -1) {
+    return { type: 'unknown', raw: rawLabel };
   }
 
-  // 滑动方向：先按字符串关键字（Enter/ArrowLeft/SwipeLeft 等任意上报形式）
-  const dirKeywords = { left: 'left', right: 'right', up: 'up', down: 'down' };
-  for (const kw in dirKeywords) {
-    if (lower.indexOf(kw) !== -1) return { type: 'swipe', direction: dirKeywords[kw], raw: rawLabel };
-  }
-  // 再按 Android 数值方向码
-  const dirByCode = { 19: 'up', 20: 'down', 21: 'left', 22: 'right', 183: 'left', 184: 'right' };
-  if (dirByCode[keyCode]) return { type: 'swipe', direction: dirByCode[keyCode], raw: rawLabel };
-
-  // 单击（确认）：GlobalHook / Enter / Space / Tap / NumpadEnter / Android ENTER(66) /
-  //   Studio 仿真「单击」按钮 KEYCODE_DPAD_CENTER(23)
-  if (
-    code === 'GlobalHook' ||
-    code === 'Enter' ||
-    code === 'NumpadEnter' ||
-    code === 'Space' ||
-    code === 'Spacebar' ||
-    code === 'Tap' ||
-    code === 'Center' ||
-    keyCode === 13 ||
-    keyCode === 32 ||
-    keyCode === 66 ||
-    keyCode === 23
-  ) {
-    return { type: 'tap', raw: rawLabel };
-  }
-
-  // 兜底：未识别的按键一律当作一次单击（保证进得去），原始码交给 __keyLog 暴露
-  return { type: 'tap', raw: rawLabel };
+  // ===== 5. 兜底：未识别 =====
+  return { type: 'unknown', raw: rawLabel };
 }
+
+/** 从归一化字符串中识别方向；forward=前滑(左)，backward=后滑(右)，与 183/184 映射一致 */
+function dirFromString(n) {
+  if (!n) return '';
+  if (n.indexOf('forward') !== -1) return 'left';
+  if (n.indexOf('backward') !== -1) return 'right';
+  if (n.indexOf('up') !== -1) return 'up';
+  if (n.indexOf('down') !== -1) return 'down';
+  if (n.indexOf('left') !== -1) return 'left';
+  if (n.indexOf('right') !== -1) return 'right';
+  return '';
+}
+
 
 /** 调试回显：把真实收到的键码用 toast 短暂显示在眼镜屏幕上（无需 schema 字段，不破坏编译），
  *  同时输出到控制台便于工作台 DevTools 查看。验证手势稳定后可简化/移除。 */
@@ -112,42 +158,10 @@ function logRaw(ctx, raw, parsed) {
   } catch (e) {}
 }
 
-/**
- * 双击判定阈值（毫秒）。
- * AIUI 无原生双击事件；若设备不上报双击码（如两次 GlobalHook/Enter），用两次短按间隔识别。
- */
-export const DOUBLE_TAP_MS = 500;
-
-/**
- * 单击去抖阈值（毫秒）。
- * 部分真机会把「一次物理按压」上报成多次 keyup，间隔小于此值视为重复上报忽略。
- */
-export const TAP_DEBOUNCE_MS = 150;
-
-/**
- * 统一判定一次 tap 的性质，处理「设备重复上报」与「双击」两种情况。
- * @returns {'single'|'double'|'ignore'}
- */
-export function classifyTap(ctx) {
-  const now = Date.now();
-  if (ctx._lastTapRaw && now - ctx._lastTapRaw < TAP_DEBOUNCE_MS) {
-    return 'ignore';
-  }
-  ctx._lastTapRaw = now;
-
-  const last = ctx._lastTapTime || 0;
-  if (last && now - last < DOUBLE_TAP_MS) {
-    ctx._lastTapTime = 0;
-    return 'double';
-  }
-  ctx._lastTapTime = now;
-  return 'single';
-}
-
-/** 兼容旧调用：返回布尔值（是否为双击）。 */
-export function isDoubleTap(ctx) {
-  return classifyTap(ctx) === 'double';
-}
+// 点击语义判定抽到 utils/tap-classify.js（与鼠标 / 触屏通道共用，避免循环依赖）
+// classifyTap 供本文件的 fireTap 使用；另外三个继续从本模块导出，保持对外接口不变。
+import { classifyTap } from './tap-classify.js';
+export { DOUBLE_TAP_MS, TAP_DEBOUNCE_MS, classifyTap, isDoubleTap } from './tap-classify.js';
 
 /**
  * 统一的按键路由：在页面 onKeyDown / onKeyUp 中调用本函数即可。
@@ -183,9 +197,18 @@ export function routeKeyEvent(ctx, event, phase) {
     return;
   }
 
+  // 未识别按键：只回显原始 code（logRaw 已做），绝不分发页面动作。
+  // 这是「滑动与点击必须区分开」的关键：宁可这次输入没有反应，
+  // 也绝不能把一次滑动误判成点击（曾导致审核驳回：无法体验其他内容）。
+  if (action.type === 'unknown') {
+    return;
+  }
+
   if (action.type === 'swipe') {
     const code = (event.code || event.key || '').toString();
     const now = Date.now();
+    // 与鼠标 / 触屏通道互相当引：刚由拖拽产生过滑动时，忽略紧随其后的按键滑动
+    if (ctx._lastPointerSwipeAt && now - ctx._lastPointerSwipeAt < 300) return;
     if (ctx._lastSwipeKey === code && now - (ctx._lastSwipeTime || 0) < 250) return;
     ctx._lastSwipeKey = code;
     ctx._lastSwipeTime = now;
@@ -217,8 +240,13 @@ function routeTap(ctx, phase) {
   }
 }
 
-/** 用 classifyTap 判定单击/双击/去抖后再分发，确保一次物理按压只触发一次。 */
+/** 用 classifyTap 判定单击/双击/去抖后再分发，确保一次物理按压只触发一次。
+ *  同时与鼠标 / 触屏通道互相当引：一次物理操作只应产生一次点击，
+ *  否则「刚点过一次就被算成双击」会误触发退出。 */
 function fireTap(ctx) {
+  // 若刚刚已由鼠标 / 触屏通道触发过点击，则本次按键点击视为同一次操作，跳过
+  if (ctx._lastPointerTap && Date.now() - ctx._lastPointerTap < 250) return;
+  ctx._lastKeyTap = Date.now();
   const kind = classifyTap(ctx);
   if (kind === 'ignore') return;
   if (kind === 'double') {
@@ -226,6 +254,49 @@ function fireTap(ctx) {
   } else {
     if (ctx.handleTap) ctx.handleTap();
   }
+}
+
+/**
+ * 语音唤醒通道路由（官方 page-events.md：页面可定义 onVoiceWakeup(event)）。
+ *
+ * 为什么必须接这一路：
+ *   AIUI 的「触控唤醒」并不是 DOM 点击，而是以 onVoiceWakeup 事件上报的，
+ *   且用 event.keyword 区分来源——触控/按键唤醒固定为 'clickAiAssist'，
+ *   语音唤醒词是 '乐奇' / 'Hi Rokid'。仿真器与真机上这一路都可能被触发，
+ *   若页面没实现 onVoiceWakeup，用户在仿真面板里点一下就「毫无反应」
+ *   （审核驳回理由 2 的另一半原因：根本没有能用的点击通道）。
+ *
+ * 语义与镜腿短按完全一致：一次唤醒 = 一次 tap（双击唤醒词 = 退出）。
+ *
+ * @param {Object} ctx   页面实例（this）
+ * @param {Object} event onVoiceWakeup 入参，形如 { keyword: 'clickAiAssist' }
+ */
+export function routeVoiceWakeup(ctx, event) {
+  if (!ctx) return;
+  const rawKeyword = (event && (event.keyword || event.wakeupWord || event.word ||
+    event.name || event.type || '')) || '';
+  const kw = String(rawKeyword).toLowerCase().replace(/[^a-z0-9]/g, '');
+  // 与鼠标 / 触屏通道互相当引：同一物理操作可能同时产生唤醒与点击
+  if (ctx._lastPointerTap && Date.now() - ctx._lastPointerTap < 250) return;
+  logRaw(ctx, 'wakeup:' + (rawKeyword || '?'), 'wakeup');
+
+  // 退出类唤醒词（部分定制唤醒词表把退出放在这里）
+  if (/^(exit|quit|close|back)$/.test(kw) || kw.indexOf('exit') !== -1 || kw.indexOf('quit') !== -1) {
+    if (ctx.handleDoubleTap) { ctx.handleDoubleTap(); return; }
+    if (ctx.handleBack) { ctx.handleBack(); return; }
+    return;
+  }
+
+  // 方向类唤醒词 → 滑动（左侧/上侧=前滑，右侧/下侧=后滑）
+  const dir = dirFromString(kw);
+  if (dir) {
+    if (ctx.handleSwipe) ctx.handleSwipe(dir);
+    return;
+  }
+
+  // 其余（'clickAiAssist'、'乐奇'、'Hi Rokid'、未知来源）一律当作一次短按：
+  // 用户主动唤醒本应用，意图就是「进入 / 执行」。
+  fireTap(ctx);
 }
 
 /**
@@ -238,10 +309,28 @@ function fireTap(ctx) {
  *  - 运行时非浏览器（无 window）时自动禁用；
  *  - 与框架原生 onKeyDown 共存：若 2 秒内框架已派发过 onKeyDown，兜底让路避免双触发；
  *  - 通过 install/uninstall 配合页面 onShow/onHide，保证同一时刻只有前台页面监听 window。
+ *
+ * 同时安装「鼠标 / 触屏」手势（见 utils/pointer-gesture.js）。
+ * 官方审核环境 / AIUI 仿真器里没有镜腿按键，用户是用鼠标拖拽或手指滑动来操作屏幕的；
+ * 早期只绑 bindtap/bindlongpress，拖拽结束被合成为一次 tap，于是「滑动」永远不成立——
+ * 这正是审核驳回理由「滑动和点击事件没有区分开」的直接原因。
+ * 这里在 window 级补上鼠标 / 触屏识别：拖拽=滑动、点按=短按、长按=双击（退出）。
  */
 let _activeFallbackCtx = null;
 
+/** 页面前台标记：只有当前可见页面才安装 window 级输入兜底（避免多页面重复触发） */
+let _activePointerCtx = null;
+
 export function installKeyboardFallback(ctx) {
+  // ===== 鼠标 / 触屏手势（仿真器与审核环境的主要输入方式）=====
+  // 换页时先把上一个页面的监听摘掉，保证同一时刻只有前台页面响应屏幕手势。
+  if (_activePointerCtx && _activePointerCtx !== ctx) {
+    removePointerGestures(_activePointerCtx);
+    _activePointerCtx = null;
+  }
+  installPointerGestures(ctx);
+  if (ctx._removePointerGestures) _activePointerCtx = ctx;
+
   if (typeof window === 'undefined' || !ctx) return;
   if (_activeFallbackCtx && _activeFallbackCtx !== ctx) {
     removeKeyboardFallback(_activeFallbackCtx);
@@ -311,6 +400,11 @@ export function installKeyboardFallback(ctx) {
 }
 
 export function removeKeyboardFallback(ctx) {
+  // 同步卸载鼠标 / 触屏手势监听（换页 / 退后台时必须摘掉，否则旧页面仍会响应手势）
+  if (ctx) {
+    if (_activePointerCtx === ctx) _activePointerCtx = null;
+    removePointerGestures(ctx);
+  }
   if (ctx && ctx._removeKeyboardFallback) {
     ctx._removeKeyboardFallback();
   }
@@ -327,8 +421,10 @@ export function removeKeyboardFallback(ctx) {
  * 无栈时兜底 reLaunch（再不行 redirectTo）到主页，保证“退出/返回”一定有反馈。
  *
  * @param {string} [fallbackUrl] 无栈时的兜底地址，默认主页
+ * @param {Object} [page]        当前页面实例；导航接口全部不可用时用它调用
+ *                              官方页面完成 API finish() 交回焦点退出
  */
-export function safeBack(fallbackUrl) {
+export function safeBack(fallbackUrl, page) {
   const url = fallbackUrl || '/pages/index/index';
   const tag = '[safeBack]';
   const wxNav = (typeof wx !== 'undefined' && wx) ? wx : {};
@@ -363,6 +459,12 @@ export function safeBack(fallbackUrl) {
     if (typeof wxNav.navigateTo === 'function') {
       try { wxNav.navigateTo({ url }); console.log(tag + ' navigateTo called'); toast(); return; }
       catch (e) { console.log(tag + ' navigateTo err: ' + (e && e.message ? e.message : e)); }
+    }
+    // 最后兜底：官方页面完成 API。部分运行时的 wx 导航全是空桩（调用不抛错但页面不退），
+    // 这时只有 finish() 能真正让页面离场；否则用户连「退出」都做不到。
+    if (page && typeof page.finish === 'function') {
+      try { page.finish(); console.log(tag + ' page.finish() called'); return; }
+      catch (e) { console.log(tag + ' finish err: ' + (e && e.message ? e.message : e)); }
     }
     console.log(tag + ' 所有导航接口均失败，无法返回');
   };

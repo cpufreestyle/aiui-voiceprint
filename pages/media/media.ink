@@ -51,7 +51,7 @@
 <script setup>
 import wx from 'wx';
 import { installKeyboardFallback, removeKeyboardFallback, safeBack } from '../../utils/gesture.js';
-import { gestureKeyDown, gestureKeyUp } from '../../utils/page-shell.js';
+import { gestureKeyDown, gestureKeyUp, gestureVoiceWakeup } from '../../utils/page-shell.js';
 import { speak } from '../../utils/tts.js';
 import {
   acquireCameraContext, isCameraAvailable, takePhoto,
@@ -474,10 +474,13 @@ export default {
   },
 
   // ====== 导航与手势 ======
-  goBackHome() { safeBack(); },
+  goBackHome() { safeBack(null, this); },
 
   onKeyDown: gestureKeyDown,
   onKeyUp: gestureKeyUp,
+
+  // 语音 / 触控唤醒通道（官方 onVoiceWakeup；触控唤醒 keyword = 'clickAiAssist'）
+  onVoiceWakeup: gestureVoiceWakeup,
 
   // 短按：intro=开始；capturing=拍照(拍照模式)/停止录像(录像中)；result=返回主页
   handleTap() {
@@ -500,7 +503,7 @@ export default {
     if (this.data.isRecording && this.data.cameraCtx) {
       try { stopRecord(this.data.cameraCtx, {}); } catch (e) {}
     }
-    safeBack();
+    safeBack(null, this);
   },
 
   // 滑动：capturing 时切换拍照/录像；其余忽略
@@ -515,11 +518,11 @@ export default {
 <page>
   <view class="container">
     <view class="header-row">
-      <view class="back-btn" bindtap="goBackHome">
+      <view class="back-btn" bindtap="goBackHome" data-gesture-ignore="1">
         <text class="back-btn-text">← 返回主页</text>
       </view>
       <text class="title">拍摄解说</text>
-      <view class="mode-badge {{visionBadgeClass}}" bindtap="toggleVisionSetting">
+      <view class="mode-badge {{visionBadgeClass}}" bindtap="toggleVisionSetting" data-gesture-ignore="1">
         <text>{{visionModeText}}</text>
       </view>
     </view>
@@ -530,8 +533,8 @@ export default {
       <text class="vs-line">当前密钥：{{apiKeyMasked}}</text>
       <input class="vs-input" type="text" password="{{true}}" placeholder="粘贴智谱 API Key" bindinput="onApiKeyInput" />
       <view class="vs-btns">
-        <button class="vs-save" bindtap="saveApiKey"><text>保存密钥</text></button>
-        <button class="vs-clear" bindtap="clearApiKey"><text>清除</text></button>
+        <button class="vs-save" bindtap="saveApiKey" data-gesture-ignore="1"><text>保存密钥</text></button>
+        <button class="vs-clear" bindtap="clearApiKey" data-gesture-ignore="1"><text>清除</text></button>
       </view>
       <text class="vs-note">未填写时为演示模式；填入后拍摄内容将由 GLM-4V 真实识别解说。</text>
     </view>
@@ -554,30 +557,30 @@ export default {
 
     <!-- 采集操作区 -->
     <view class="capture-ops" ink:if="{{wizardStep === 'capturing'}}">
-      <button class="op-btn shoot" bindtap="onTakePhoto" ink:if="{{captureMode === 'photo'}}">
+      <button class="op-btn shoot" bindtap="onTakePhoto" ink:if="{{captureMode === 'photo'}}" data-gesture-ignore="1">
         <text class="op-main">拍照</text>
         <text class="op-sub">采集一张图片（≤5MB）</text>
       </button>
-      <button class="op-btn record {{recordBtnClass}}" bindtap="onToggleRecord" ink:if="{{captureMode === 'video'}}">
+      <button class="op-btn record {{recordBtnClass}}" bindtap="onToggleRecord" ink:if="{{captureMode === 'video'}}" data-gesture-ignore="1">
         <text class="op-main">{{recordBtnText}}</text>
         <text class="op-sub">采集一段视频（≤50MB）</text>
       </button>
-      <button class="op-btn switch" bindtap="toggleCaptureMode">
+      <button class="op-btn switch" bindtap="toggleCaptureMode" data-gesture-ignore="1">
         <text class="op-main">{{captureModeText}}</text>
       </button>
-      <button class="op-btn describe" bindtap="startDescribe" disabled="{{!canDescribe}}">
+      <button class="op-btn describe" bindtap="startDescribe" disabled="{{!canDescribe}}" data-gesture-ignore="1">
         <text class="op-main">开始解说</text>
         <text class="op-sub">对已采集的 {{count}} 项逐一识别播报</text>
       </button>
-      <button class="op-btn undo" bindtap="removeLast" disabled="{{count === 0}}">
+      <button class="op-btn undo" bindtap="removeLast" disabled="{{count === 0}}" data-gesture-ignore="1">
         <text class="op-main">删除上一项</text>
       </button>
     </view>
 
     <!-- 结果区操作 -->
     <view class="result-ops" ink:if="{{wizardStep === 'result'}}">
-      <button class="op-btn again" bindtap="resetAll"><text class="op-main">再拍一组</text></button>
-      <button class="op-btn home" bindtap="goBackHome"><text class="op-main">返回主页</text></button>
+      <button class="op-btn again" bindtap="resetAll" data-gesture-ignore="1"><text class="op-main">再拍一组</text></button>
+      <button class="op-btn home" bindtap="goBackHome" data-gesture-ignore="1"><text class="op-main">返回主页</text></button>
     </view>
 
     <!-- 采集/解说列表 -->
@@ -598,7 +601,7 @@ export default {
 
     <text class="gesture-hint">短按：拍照/开始 ｜ 滑动：拍照↔录像 ｜ 双击：够 3 项则解说，否则退出</text>
 
-    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap">
+    <view class="sim-tap" bindtap="handleTap" bindlongpress="handleDoubleTap" data-gesture-ignore="1">
       <text class="sim-tap-text">仿真操作：点此=短按（开始 / 拍照 / 返回）｜ 长按此区域=解说或退出</text>
     </view>
   </view>
