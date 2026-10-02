@@ -329,6 +329,11 @@ export default {
       return;
     }
     const count = db.users.length;
+    // 剪贴板 API 在部分 AIUI 运行时可能不存在：缺失时明确提示，避免调用直接抛错中断页面
+    if (typeof wx.setClipboardData !== 'function') {
+      wx.showToast({ title: '当前运行时不支持剪贴板，无法导出', icon: 'none', duration: 2200 });
+      return;
+    }
     // 声纹模板属于生物特征信息，导出过剪贴板（明文、可被其他应用读取）前必须警示
     wx.showModal({
       title: '导出声纹库',
@@ -362,46 +367,60 @@ export default {
   // 导入声纹库：从剪贴板读取 JSON，校验后按 id 去重合并（同 id 覆盖为新数据）
   importDb() {
     const that = this;
-    wx.getClipboardData({
-      success(res) {
-        const raw = (res && res.data ? res.data : '').trim();
-        if (!raw) {
-          wx.showToast({ title: '剪贴板为空', icon: 'none', duration: 1500 });
-          return;
-        }
-        let payload = null;
-        try { payload = JSON.parse(raw); } catch (e) {
-          wx.showToast({ title: '内容不是有效 JSON，导入取消', icon: 'none', duration: 2000 });
-          return;
-        }
-        const users = payload && Array.isArray(payload.users) ? payload.users : null;
-        if (!users || users.length === 0 ||
-            !users.every((u) => u && u.id && u.name && u.template)) {
-          wx.showToast({ title: '格式不符：缺少 users/模板，导入取消', icon: 'none', duration: 2200 });
-          return;
-        }
-        wx.showModal({
-          title: '导入声纹库',
-          content: '将导入 ' + users.length + ' 条声纹（同名同 id 的会被覆盖）。确认导入？',
-          success(m) {
-            if (!m.confirm) return;
-            const db = wx.getStorageSync('voiceprint_db') || { users: [] };
-            if (!Array.isArray(db.users)) db.users = [];
-            const byId = {};
-            db.users.forEach((u) => { byId[u.id] = u; });
-            users.forEach((u) => { byId[u.id] = u; });
-            db.users = Object.keys(byId).map((k) => byId[k]);
-            if (that.saveDb(db, '导入完成，共 ' + db.users.length + ' 条')) {
-              reconcileActiveUser();
-              that.loadVoiceprintDB();
-            }
+    const MAX_IMPORT = 200; // 导入条数上限：避免超大 payload 撑爆 storage
+    // 剪贴板 API 在部分 AIUI 运行时可能不存在：缺失时明确提示，避免调用直接抛错中断页面
+    if (typeof wx.getClipboardData !== 'function') {
+      wx.showToast({ title: '当前运行时不支持剪贴板，无法导入', icon: 'none', duration: 2200 });
+      return;
+    }
+    try {
+      wx.getClipboardData({
+        success(res) {
+          const raw = (res && res.data ? res.data : '').trim();
+          if (!raw) {
+            wx.showToast({ title: '剪贴板为空', icon: 'none', duration: 1500 });
+            return;
           }
-        });
-      },
-      fail() {
-        wx.showToast({ title: '读取剪贴板失败', icon: 'none', duration: 1500 });
-      }
-    });
+          let payload = null;
+          try { payload = JSON.parse(raw); } catch (e) {
+            wx.showToast({ title: '内容不是有效 JSON，导入取消', icon: 'none', duration: 2000 });
+            return;
+          }
+          const users = payload && Array.isArray(payload.users) ? payload.users : null;
+          if (!users || users.length === 0 ||
+              !users.every((u) => u && u.id && u.name && u.template)) {
+            wx.showToast({ title: '格式不符：缺少 users/模板，导入取消', icon: 'none', duration: 2200 });
+            return;
+          }
+          if (users.length > MAX_IMPORT) {
+            wx.showToast({ title: '一次最多导入 ' + MAX_IMPORT + ' 条，请分批导入', icon: 'none', duration: 2200 });
+            return;
+          }
+          wx.showModal({
+            title: '导入声纹库',
+            content: '将导入 ' + users.length + ' 条声纹（同名同 id 的会被覆盖）。确认导入？',
+            success(m) {
+              if (!m.confirm) return;
+              const db = wx.getStorageSync('voiceprint_db') || { users: [] };
+              if (!Array.isArray(db.users)) db.users = [];
+              const byId = {};
+              db.users.forEach((u) => { byId[u.id] = u; });
+              users.forEach((u) => { byId[u.id] = u; });
+              db.users = Object.keys(byId).map((k) => byId[k]);
+              if (that.saveDb(db, '导入完成，共 ' + db.users.length + ' 条')) {
+                reconcileActiveUser();
+                that.loadVoiceprintDB();
+              }
+            }
+          });
+        },
+        fail() {
+          wx.showToast({ title: '读取剪贴板失败', icon: 'none', duration: 1500 });
+        }
+      });
+    } catch (e) {
+      wx.showToast({ title: '导入失败：' + e, icon: 'none', duration: 2000 });
+    }
   },
 
   formatTime(timestamp) {
